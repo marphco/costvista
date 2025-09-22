@@ -52,7 +52,8 @@ export default function Home() {
     setError(null);
     setRows([]);
     try {
-      const resp = await fetch("/api/parse", {
+      const API = process.env.NEXT_PUBLIC_API || "";
+const resp = await fetch(`${API}/api/parse`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
