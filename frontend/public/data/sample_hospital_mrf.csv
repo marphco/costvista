@@ -1,0 +1,11 @@
+provider_name,code_type,code,description,rate_type,negotiated_rate,geo,last_updated
+General Hospital,CPT,70551,MRI brain without contrast,in_network_negotiated,842.13,NY-NYC,2025-08-01
+General Hospital,CPT,74177,CT abdomen/pelvis with contrast,in_network_negotiated,1199.50,NY-NYC,2025-08-01
+General Hospital,CPT,45378,Colonoscopy diagnostic,in_network_negotiated,658.00,NY-NYC,2025-08-01
+General Hospital,CPT,66984,Cataract surgery,in_network_negotiated,2900.00,NY-NYC,2025-08-01
+General Hospital,DRG,775,Vaginal delivery w/o complicating diagnoses,in_network_negotiated,7400.00,NY-NYC,2025-08-01
+Metro Medical Center,CPT,70551,MRI brain without contrast,in_network_negotiated,910.00,NY-NYC,2025-08-01
+Metro Medical Center,CPT,74177,CT abdomen/pelvis with contrast,in_network_negotiated,1260.00,NY-NYC,2025-08-01
+Metro Medical Center,CPT,45378,Colonoscopy diagnostic,in_network_negotiated,720.00,NY-NYC,2025-08-01
+Metro Medical Center,CPT,66984,Cataract surgery,in_network_negotiated,3100.00,NY-NYC,2025-08-01
+Metro Medical Center,DRG,775,Vaginal delivery w/o complicating diagnoses,in_network_negotiated,7800.00,NY-NYC,2025-08-01
