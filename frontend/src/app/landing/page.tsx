@@ -9,7 +9,5 @@ export const metadata: Metadata = {
 };
 
 export default function Page() {
-  // Questo file resta Server Component (niente "use client")
-  // e si limita a rendere il Client Component animato.
   return <LandingClient />;
 }
