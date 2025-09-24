@@ -40,3 +40,18 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Node
+node_modules/
+**/node_modules/
+
+# Python
+.venv/
+**/.venv/
+__pycache__/
+*.pyc
+
+# Build output
+.next/
+dist/
+build/
