@@ -6,11 +6,6 @@ type ParseReq = {
   codes?: string[];
 };
 
-type BackendOk = {
-  count: number;
-  rows: Record<string, unknown>[];
-};
-
 function isParseReq(x: unknown): x is ParseReq {
   return (
     typeof x === "object" &&

@@ -157,32 +157,34 @@ export default function DemoPage() {
   const [sumSortDir, setSumSortDir] = useState<Dir>("asc");
 
   async function parseMRF(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    setRows([]);
-    setSummary([]);
-    try {
-      const API = process.env.NEXT_PUBLIC_API || "";
-      const resp = await fetch(`${API}/api/summary`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url,
-          codes: codeChips.map((c) => c.code),
-          include_rows: true,
-        }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data?.detail || "Summary error");
-      setRows(data.rows || []);
-      setSummary(data.summary || []);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+  e.preventDefault();
+  setLoading(true);
+  setError(null);
+  setRows([]);
+  setSummary([]);
+  try {
+    const API = process.env.NEXT_PUBLIC_API || "";
+    const resp = await fetch(`${API}/api/summary`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url,
+        codes: codeChips.map((c) => c.code),
+        include_rows: true,
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data?.detail || "Summary error");
+    setRows((data.rows ?? []) as Row[]);
+    setSummary((data.summary ?? []) as Summary[]);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    setError(msg);
+  } finally {
+    setLoading(false);
   }
+}
+
 
   // --- Derived ROWS ---
   const filteredSortedRows = useMemo(() => {
