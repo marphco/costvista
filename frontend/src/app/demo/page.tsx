@@ -2,6 +2,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 // ---------- Types ----------
@@ -56,7 +57,7 @@ export default function DemoPage() {
   const Header = (
     <header className="sticky top-0 z-40 border-b border-white/10 backdrop-blur supports-[backdrop-filter]:bg-white/5">
       <div className="mx-auto max-w-6xl px-3 md:px-4 py-3 flex items-center justify-between">
-        <a href="/" className="flex items-center gap-3">
+        <Link href="/" className="flex items-center gap-3">
           <Image
             src="/assets/costvista.svg"
             alt="Costvista"
@@ -65,8 +66,8 @@ export default function DemoPage() {
             className="h-12 md:h-14 w-auto drop-shadow-[0_1px_0_rgba(255,255,255,0.35)] [filter:brightness(1.15)]"
           />
           <span className="sr-only">Costvista</span>
-        </a>
-        <a href="/" className="text-sm px-3 py-1.5 rounded border border-white/20 hover:bg-white/10">Back to landing</a>
+        </Link>
+        <Link href="/" className="text-sm px-3 py-1.5 rounded border border-white/20 hover:bg-white/10">Back to landing</Link>
       </div>
     </header>
   );
@@ -231,34 +232,57 @@ export default function DemoPage() {
   };
 
   function exportRowsCSV() {
-    const header = ["provider_name","code_type","code","description","rate_type","negotiated_rate","geo","last_updated"];
-    const csv = [header.join(",")]
-      .concat(filteredSortedRows.map(r => header.map(h => (r as any)[h] ?? "").join(",")))
-      .join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "costvista_rows.csv";
-    a.click();
-  }
+  const headerKeys: (keyof Row)[] = [
+    "provider_name",
+    "code_type",
+    "code",
+    "description",
+    "rate_type",
+    "negotiated_rate",
+    "geo",
+    "last_updated",
+  ];
+  const header = headerKeys.join(",");
+  const lines = filteredSortedRows.map((r) =>
+    headerKeys
+      .map((k) => (r[k] ?? ""))
+      .map((v) => (typeof v === "string" ? `"${v.replace(/"/g, '""')}"` : String(v)))
+      .join(",")
+  );
+  const csv = [header, ...lines].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "costvista_rows.csv";
+  a.click();
+}
+
   function exportSummaryCSV() {
-    const header = ["code","description","count","min","median","p25","p75","max","top1","top2","top3"];
-    const csv = [header.join(",")]
-      .concat(filteredSortedSummary.map(s => {
-        const tops = s.top3?.map(t => `${t.provider_name} ($${t.negotiated_rate.toFixed(2)})`) || [];
-        return [
-          s.code, `"${(s.description||"").replace(/"/g,'""')}"`, s.count ?? 0,
-          s.min ?? 0, s.median ?? 0, s.p25 ?? 0, s.p75 ?? 0, s.max ?? 0,
-          tops[0]||"", tops[1]||"", tops[2]||""
-        ].join(",")
-      }))
-      .join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "costvista_summary.csv";
-    a.click();
-  }
+  const header = ["code","description","count","min","median","p25","p75","max","top1","top2","top3"];
+  const lines = filteredSortedSummary.map((s) => {
+    const tops = (s.top3 ?? []).map((t) => `${t.provider_name} ($${t.negotiated_rate.toFixed(2)})`);
+    return [
+      s.code,
+      `"${(s.description ?? "").replace(/"/g, '""')}"`,
+      s.count ?? 0,
+      s.min ?? 0,
+      s.median ?? 0,
+      s.p25 ?? 0,
+      s.p75 ?? 0,
+      s.max ?? 0,
+      tops[0] ?? "",
+      tops[1] ?? "",
+      tops[2] ?? "",
+    ].join(",");
+  });
+  const csv = [header.join(","), ...lines].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "costvista_summary.csv";
+  a.click();
+}
+
 
   const useSampleCSV = () => setUrl("/data/sample_hospital_mrf.csv");
   const useSampleJSON = () => setUrl("/data/sample_hospital_mrf.json");
