@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+import os, re
 from pydantic import BaseModel, AnyHttpUrl
 from typing import List, Dict, Any
 import csv, io, json, httpx, os
@@ -7,10 +8,20 @@ from pathlib import Path
 
 app = FastAPI(title="Costvista API")
 
-# CORS: consenti la tua app Next su localhost:3000
+# Leggi origini consentite da env (virgola-separate)
+# Esempio consigliato in Railway:
+# CORS_ORIGINS=https://tuo-progetto.vercel.app,https://tuo-progetto-git-*.vercel.app,http://localhost:3000
+raw = os.getenv("CORS_ORIGINS", "http://localhost:3000")
+origins = [o.strip() for o in raw.split(",") if o.strip()]
+
+# Se vuoi permettere le preview su Vercel con wildcard, usa allow_origin_regex
+# (Vercel preview tipica: https://<branch>-<project>-<hash>.vercel.app)
+vercel_preview_regex = r"^https:\/\/.*\.vercel\.app$"
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[o for o in origins if not o.endswith(".vercel.app")],  # esatte
+    allow_origin_regex=vercel_preview_regex,  # wildcard per tutte le preview
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
