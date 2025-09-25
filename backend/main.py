@@ -39,6 +39,53 @@ async def read_text(url_or_path: str) -> str:
         raise HTTPException(404, f"Local file not found: {fp}")
     return fp.read_text(encoding="utf-8")
 
+# --- CMS index detection (Cigna/BCBS/etc.) -----------------------------------
+from typing import Iterable
+
+def _raise_index_suggestions(urls: List[str]):
+    # 409 per "conflict/mismatch" fra ciò che ci si aspettava (tariffe) e ciò che è arrivato (index)
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "error": "index_detected",
+            "message": "The provided URL is a CMS Table of Contents (index). Pick an in-network rates file instead.",
+            "suggestions": urls[:10],  # mostra fino a 10 link
+        },
+    )
+
+def _extract_in_network_urls(obj: Any) -> List[str]:
+    """
+    Se 'obj' è un Table of Contents (index) CMS, estrae gli URL dei file in_network.
+    Restituisce [] se non è un index.
+    """
+    urls: List[str] = []
+
+    def _push_from(seq: Iterable[Dict[str, Any]]):
+        for item in seq:
+            if not isinstance(item, dict):
+                continue
+            loc = item.get("location") or item.get("url") or item.get("link")
+            if isinstance(loc, str) and loc.strip():
+                urls.append(loc.strip())
+
+    if isinstance(obj, dict):
+        # Struttura piatta: { in_network_files: [...] }
+        if isinstance(obj.get("in_network_files"), list):
+            _push_from(obj["in_network_files"])
+
+        # Struttura annidata: { reporting_structure: [{ in_network_files: [...]}, ...] }
+        if isinstance(obj.get("reporting_structure"), list):
+            for rs in obj["reporting_structure"]:
+                if isinstance(rs, dict) and isinstance(rs.get("in_network_files"), list):
+                    _push_from(rs["in_network_files"])
+
+        # Alcuni index hanno "files": [{type: "in_network", location: "..."}]
+        if isinstance(obj.get("files"), list):
+            in_net = [f for f in obj["files"] if isinstance(f, dict) and str(f.get("type","")).lower().startswith("in")]
+            _push_from(in_net)
+
+    return list(dict.fromkeys(urls))  # dedup, preserva ordine
+
 
 _number_re = re.compile(r"[^\d\.\-]")  # tieni solo 0-9 . -
 
@@ -251,19 +298,28 @@ class SummaryReq(BaseModel):
 @app.post("/api/parse")
 async def parse(req: ParseReq):
     text = await read_text(req.url)
+
     if req.url.endswith(".csv") or ".csv" in req.url:
         rows = parse_csv(text)
+
     elif req.url.endswith(".json") or ".json" in req.url:
         try:
             obj = json.loads(text)
         except json.JSONDecodeError:
+            # NDJSON o stringa con righe JSON
             rows = _find_first_array_of_objects(text) or []
             if not rows:
                 raise HTTPException(400, "Invalid JSON.")
         else:
+            # Riconosci “Table of Contents” CMS e proponi i file giusti
+            suggestions = _extract_in_network_urls(obj)
+            if suggestions:
+                    _raise_index_suggestions(suggestions)
+
             rows = _find_first_array_of_objects(obj) or []
             if not rows:
                 raise HTTPException(400, "Expected an array of objects or { data: [...] }.")
+
     else:
         raise HTTPException(400, "Unsupported file type. Use .csv or .json")
 
@@ -279,8 +335,10 @@ async def parse(req: ParseReq):
 @app.post("/api/summary")
 async def summary(req: SummaryReq):
     text = await read_text(req.url)
+
     if req.url.endswith(".csv") or ".csv" in req.url:
         rows = parse_csv(text)
+
     elif req.url.endswith(".json") or ".json" in req.url:
         try:
             obj = json.loads(text)
@@ -289,9 +347,15 @@ async def summary(req: SummaryReq):
             if not rows:
                 raise HTTPException(400, "Invalid JSON.")
         else:
+            # Riconosci gli index e proponi i link ai file con tariffe
+            suggestions = _extract_in_network_urls(obj)
+            if suggestions:
+                _raise_index_suggestions(suggestions)
+
             rows = _find_first_array_of_objects(obj) or []
             if not rows:
                 raise HTTPException(400, "Expected an array of objects or { data: [...] }.")
+
     else:
         raise HTTPException(400, "Unsupported file type. Use .csv or .json")
 

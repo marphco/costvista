@@ -184,6 +184,7 @@ export default function DemoPage() {
   const [uploadErr, setUploadErr] = useState<string | null>(null);
   const [progress, setProgress] = useState<number>(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [indexSuggestions, setIndexSuggestions] = useState<string[]>([]);
 
   function handleFileUpload(file: File) {
     setUploadErr(null);
@@ -398,6 +399,7 @@ export default function DemoPage() {
     setCodeChips([]);
     setProcQuery("");
     setDebouncedQ("");
+    setIndexSuggestions([]);
   }
 
   useEffect(() => {
@@ -413,77 +415,100 @@ export default function DemoPage() {
   }, [allRows, allSummary, codeChips, debouncedQ]);
 
   /* ---------- Analyze by URL / demo ---------- */
-  const [showUrlBox, setShowUrlBox] = useState(false);
-  const [url, setUrl] = useState("");
+const [showUrlBox, setShowUrlBox] = useState(false);
+const [url, setUrl] = useState("");
 
-  async function analyzeURL(hrefOrLocalPath: string) {
-    if (isDemoPath(hrefOrLocalPath)) {
-      setSource({ kind: "demo", path: hrefOrLocalPath });
-    } else {
-      setSource({ kind: "url", href: hrefOrLocalPath });
-    }
-
-    setLoading(true);
-    setError(null);
-    setRows([]);
-    setSummary([]);
-    setProgress(0);
-
-    try {
-      const resp = await fetch(`${API}/api/summary`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: hrefOrLocalPath, include_rows: true }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data?.detail || "Summary error");
-      resetTables(data);
-      setProgress(100);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(msg);
-      setSource(null);
-    } finally {
-      setLoading(false);
-      setTimeout(() => setProgress(0), 600);
-    }
+async function analyzeURL(hrefOrLocalPath: string) {
+  // badge sorgente
+  if (isDemoPath(hrefOrLocalPath)) {
+    setSource({ kind: "demo", path: hrefOrLocalPath });
+  } else {
+    setSource({ kind: "url", href: hrefOrLocalPath });
   }
 
-  async function analyzeManyURLs(paths: DemoPath[]) {
-    setLoading(true);
+  setLoading(true);
+  setError(null);
+  setRows([]);
+  setSummary([]);
+  setProgress(0);
+
+  try {
+    const resp = await fetch(`${API}/api/summary`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: hrefOrLocalPath, include_rows: true }),
+    });
+
+    const data = await resp.json().catch(() => ({}));
+const payload: any = (data && typeof data === "object" && "detail" in data) ? data.detail : data;
+
+if (!resp.ok) {
+  // 409 da backend: index CMS con suggerimenti
+  if (payload?.error === "index_detected" && Array.isArray(payload?.suggestions) && payload.suggestions.length) {
+    setIndexSuggestions(payload.suggestions as string[]);
+    setShowUrlBox(true);       // fai in modo che i bottoni siano visibili
     setError(null);
-    setRows([]);
-    setSummary([]);
+    setRows([]); setSummary([]);
     setProgress(0);
-    try {
-      const parts = await Promise.all(
-        paths.map(async (p) => {
-          const resp = await fetch(`${API}/api/summary`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: p, include_rows: true }),
-          });
-          const data = await resp.json();
-          if (!resp.ok) throw new Error(data?.detail || `Summary error for ${p}`);
-          (data.rows ?? []).forEach((r: any) => (r.source = DEMO_LABEL[p]));
-          return data.rows ?? [];
-        })
-      );
-      const merged = parts.flat();
-      setAllRows(merged);
-      setAllSummary(summarizeClient(merged));
-      setRows(merged);
-      setSummary(summarizeClient(merged));
-      setSource({ kind: "demo", path: paths[0] });
-      setProgress(100);
-    } catch (e: any) {
-      setError(e.message || String(e));
-      setSource(null);
-    } finally {
-      setLoading(false);
-      setTimeout(() => setProgress(0), 600);
-    }
+    return;
   }
+
+  // altri errori → estrai messaggio leggibile
+  const msg =
+    typeof payload === "string"
+      ? payload
+      : payload?.message || data?.detail || `HTTP ${resp.status}`;
+  throw new Error(String(msg));
+}
+
+    resetTables(data);
+    setIndexSuggestions([]); // pulisci eventuali suggerimenti precedenti
+    setProgress(100);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    setError(msg);
+    setSource(null);
+  } finally {
+    setLoading(false);
+    setTimeout(() => setProgress(0), 600);
+  }
+} // <-- ✅ QUESTA parentesi chiude analyzeURL
+
+async function analyzeManyURLs(paths: DemoPath[]) {
+  setLoading(true);
+  setError(null);
+  setRows([]);
+  setSummary([]);
+  setProgress(0);
+  try {
+    const parts = await Promise.all(
+      paths.map(async (p) => {
+        const resp = await fetch(`${API}/api/summary`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: p, include_rows: true }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data?.detail || `Summary error for ${p}`);
+        (data.rows ?? []).forEach((r: any) => (r.source = DEMO_LABEL[p]));
+        return data.rows ?? [];
+      })
+    );
+    const merged = parts.flat();
+    setAllRows(merged);
+    setAllSummary(summarizeClient(merged));
+    setRows(merged);
+    setSummary(summarizeClient(merged));
+    setSource({ kind: "demo", path: paths[0] });
+    setProgress(100);
+  } catch (e: any) {
+    setError(e.message || String(e));
+    setSource(null);
+  } finally {
+    setLoading(false);
+    setTimeout(() => setProgress(0), 600);
+  }
+}
 
   /* ---------- Derived ---------- */
   const filteredSortedRows = useMemo(() => {
@@ -741,6 +766,34 @@ export default function DemoPage() {
                 onChange={(e) => setUrl(e.target.value)}
                 placeholder="CSV/JSON URL or local path (e.g., /data/sample_hospital_mrf.csv)"
               />
+              {indexSuggestions.length > 0 && (
+  <div className="mt-3 space-y-2 rounded-lg border border-yellow-500/40 bg-yellow-500/10 p-3">
+    <div className="text-sm font-medium">This looks like a CMS index. Pick an in-network file:</div>
+    <div className="flex flex-wrap gap-2">
+      {indexSuggestions.map((u, i) => (
+        <button
+          key={u + i}
+          type="button"
+          onClick={() => analyzeURL(u)}
+          className="text-xs px-3 py-2 rounded border hover:bg-white/10 truncate max-w-full"
+          title={u}
+        >
+          {u}
+        </button>
+      ))}
+    </div>
+    <div className="pt-1">
+      <button
+        type="button"
+        onClick={() => setIndexSuggestions([])}
+        className="text-xs underline opacity-80 hover:opacity-100"
+      >
+        Dismiss suggestions
+      </button>
+    </div>
+  </div>
+)}
+
               <button
                 type="button"
                 onClick={() => url && analyzeURL(url)}
@@ -771,7 +824,7 @@ export default function DemoPage() {
           />
 
           {isOpen && suggestions.length > 0 && (
-            <div className="absolute z-20 mt-1 w-[calc(100%-3rem)] max-w-6xl max-height-72 overflow-auto border rounded-lg bg-black/90 backdrop-blur-sm">
+            <div className="absolute z-20 mt-1 w-[calc(100%-3rem)] max-w-6xl max-h-72 overflow-auto border rounded-lg bg-black/90 backdrop-blur-sm">
               {suggestions.map((s, idx) => (
                 <button
                   type="button"
