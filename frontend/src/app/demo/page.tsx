@@ -8,14 +8,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 /* ============================
    Demo paths (unica fonte)
 ============================ */
-export const DEMO_PATHS = [
-  "/data/sample_hospital_mrf.csv",          // Plan A (CSV)
-  "/data/sample_hospital_mrf.json",         // Plan A (JSON)
-  "/data/sample_hospital_mrf_plan_b.csv",   // Plan B (CSV)
-  "/data/sample_hospital_mrf_plan_c.json",  // Plan C (JSON)
+const DEMO_PATHS = [
+  "/data/sample_hospital_mrf.csv",
+  "/data/sample_hospital_mrf.json",
+  "/data/sample_hospital_mrf_plan_b.csv",
+  "/data/sample_hospital_mrf_plan_c.json",
 ] as const;
 
-type DemoPath = typeof DEMO_PATHS[number];
+type DemoPath = (typeof DEMO_PATHS)[number];
 
 const DEMO_LABEL: Record<DemoPath, string> = {
   "/data/sample_hospital_mrf.csv": "Plan A (CSV)",
@@ -63,9 +63,24 @@ type Summary = {
   top3: TopItem[];
 };
 
+type ApiSummaryResponse = { rows?: Row[]; summary?: Summary[] };
+type ApiError = { detail?: string; error?: string; message?: string; suggestions?: string[] };
+
 type CodeItem = { code: string; label: string };
 type CodeChip = { code: string; label: string };
 type Dir = "asc" | "desc";
+
+/* ============================
+   Type guards
+============================ */
+const hasDetail = (x: unknown): x is { detail: unknown } =>
+  typeof x === "object" && x !== null && "detail" in x;
+
+const isApiErrorShape = (x: unknown): x is ApiError =>
+  typeof x === "object" && x !== null && ("detail" in x || "error" in x || "message" in x);
+
+const isApiSummaryShape = (x: unknown): x is ApiSummaryResponse =>
+  typeof x === "object" && x !== null && ("rows" in x || "summary" in x);
 
 /* ============================
    Utils
@@ -99,8 +114,8 @@ const getCodesToSend = (chips: { code: string }[], currentQuery: string): string
 const median = (arr: number[]) => {
   if (!arr.length) return 0;
   const s = [...arr].sort((a, b) => a - b);
-  const n = s.length,
-    m = Math.floor(n / 2);
+  const n = s.length;
+  const m = Math.floor(n / 2);
   return n % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
 const percentile = (arr: number[], p: number) => {
@@ -108,8 +123,8 @@ const percentile = (arr: number[], p: number) => {
   const s = [...arr].sort((a, b) => a - b);
   if (s.length === 1) return s[0];
   const k = (s.length - 1) * (p / 100);
-  const f = Math.floor(k),
-    c = Math.min(f + 1, s.length - 1);
+  const f = Math.floor(k);
+  const c = Math.min(f + 1, s.length - 1);
   if (f === c) return s[f];
   return s[f] + (s[c] - s[f]) * (k - f);
 };
@@ -160,6 +175,7 @@ export default function DemoPage() {
             width={260}
             height={72}
             className="h-12 md:h-14 w-auto drop-shadow-[0_1px_0_rgba(255,255,255,0.35)] [filter:brightness(1.15)]"
+            priority
           />
           <span className="sr-only">Costvista</span>
         </Link>
@@ -215,21 +231,21 @@ export default function DemoPage() {
     };
     xhr.onload = () => {
       try {
-        let data: any = null;
+        let data: unknown;
         try {
-          data = JSON.parse(xhr.responseText);
+          data = JSON.parse(xhr.responseText) as unknown;
         } catch {
           data = { detail: xhr.responseText || "Server returned a non-JSON response." };
         }
 
         if (xhr.status >= 200 && xhr.status < 300) {
-          resetTables(data);
+          const payload = isApiSummaryShape(data) ? data : { rows: [], summary: [] };
+          resetTables(payload);
           setSource({ kind: "upload", name: file.name, size: file.size, type: file.type });
           setProgress(100);
         } else {
-          setUploadErr(
-            typeof data?.detail === "string" && data.detail.trim() ? data.detail : `Upload error (HTTP ${xhr.status}).`
-          );
+          const d = (isApiErrorShape(data) ? data : { detail: `Upload error (HTTP ${xhr.status}).` }) as ApiError;
+          setUploadErr(typeof d.detail === "string" && d.detail.trim() ? d.detail : `Upload error (HTTP ${xhr.status}).`);
         }
       } catch {
         setUploadErr("Unexpected error while reading the server response.");
@@ -245,10 +261,17 @@ export default function DemoPage() {
     const form = new FormData();
     form.append("file", file);
     const resp = await fetch(`${API}/api/summary_upload`, { method: "POST", body: form });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data?.detail || "Upload error");
-    (data.rows ?? []).forEach((r: any) => (r.source = file.name));
-    return data;
+    const data: unknown = await resp.json();
+
+    if (!resp.ok) {
+      const err = (isApiErrorShape(data) && (data.detail || data.message)) || "Upload error";
+      throw new Error(String(err));
+    }
+
+    const payload: ApiSummaryResponse = isApiSummaryShape(data) ? data : { rows: [], summary: [] };
+    const rows: Row[] = (payload.rows ?? []).map((r) => ({ ...r, source: file.name }));
+    const summary: Summary[] = payload.summary ?? summarizeClient(rows);
+    return { rows, summary };
   }
 
   async function onUploadInputChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -260,14 +283,15 @@ export default function DemoPage() {
     setProgress(0);
     try {
       const parts = await Promise.all(files.map(uploadOne));
-      const mergedRows = parts.flatMap((p) => p.rows ?? []);
+      const mergedRows = parts.flatMap((p) => p.rows);
       setAllRows(mergedRows);
       setAllSummary(summarizeClient(mergedRows));
       setRows(mergedRows);
       setSummary(summarizeClient(mergedRows));
       setSource({ kind: "upload", name: `${files.length} files`, size: 0, type: "mixed" });
-    } catch (err: any) {
-      setError(err.message || String(err));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
     } finally {
       setUploading(false);
       setProgress(0);
@@ -415,100 +439,118 @@ export default function DemoPage() {
   }, [allRows, allSummary, codeChips, debouncedQ]);
 
   /* ---------- Analyze by URL / demo ---------- */
-const [showUrlBox, setShowUrlBox] = useState(false);
-const [url, setUrl] = useState("");
+  const [showUrlBox, setShowUrlBox] = useState(false);
+  const [url, setUrl] = useState("");
 
-async function analyzeURL(hrefOrLocalPath: string) {
-  // badge sorgente
-  if (isDemoPath(hrefOrLocalPath)) {
-    setSource({ kind: "demo", path: hrefOrLocalPath });
-  } else {
-    setSource({ kind: "url", href: hrefOrLocalPath });
-  }
+  async function analyzeURL(hrefOrLocalPath: string) {
+    if (isDemoPath(hrefOrLocalPath)) {
+      setSource({ kind: "demo", path: hrefOrLocalPath });
+    } else {
+      setSource({ kind: "url", href: hrefOrLocalPath });
+    }
 
-  setLoading(true);
-  setError(null);
-  setRows([]);
-  setSummary([]);
-  setProgress(0);
-
-  try {
-    const resp = await fetch(`${API}/api/summary`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: hrefOrLocalPath, include_rows: true }),
-    });
-
-    const data = await resp.json().catch(() => ({}));
-const payload: any = (data && typeof data === "object" && "detail" in data) ? data.detail : data;
-
-if (!resp.ok) {
-  // 409 da backend: index CMS con suggerimenti
-  if (payload?.error === "index_detected" && Array.isArray(payload?.suggestions) && payload.suggestions.length) {
-    setIndexSuggestions(payload.suggestions as string[]);
-    setShowUrlBox(true);       // fai in modo che i bottoni siano visibili
+    setLoading(true);
     setError(null);
-    setRows([]); setSummary([]);
+    setRows([]);
+    setSummary([]);
     setProgress(0);
-    return;
+
+    try {
+      const resp = await fetch(`${API}/api/summary`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: hrefOrLocalPath, include_rows: true }),
+      });
+
+      const raw: unknown = await resp.json().catch(() => ({} as unknown));
+      const body: unknown = hasDetail(raw) ? raw.detail : raw;
+
+      if (!resp.ok) {
+        // 409 da backend: index CMS con suggerimenti
+        const maybeErr = body as ApiError;
+        if (
+          typeof maybeErr === "object" &&
+          maybeErr !== null &&
+          (maybeErr as ApiError).error === "index_detected" &&
+          Array.isArray((maybeErr as ApiError).suggestions) &&
+          (maybeErr as ApiError).suggestions!.length > 0
+        ) {
+          setIndexSuggestions((maybeErr as ApiError).suggestions as string[]);
+          setShowUrlBox(true);
+          setError(null);
+          setRows([]);
+          setSummary([]);
+          setProgress(0);
+          return;
+        }
+
+        const msg =
+          (isApiErrorShape(body) && (body.detail || body.message)) ||
+          (isApiErrorShape(raw) && (raw.detail || raw.message)) ||
+          `HTTP ${resp.status}`;
+        throw new Error(String(msg));
+      }
+
+      const payload = (isApiSummaryShape(raw) ? raw : hasDetail(raw) && isApiSummaryShape(raw.detail) ? raw.detail : {
+        rows: [],
+        summary: [],
+      }) as ApiSummaryResponse;
+
+      resetTables(payload);
+      setIndexSuggestions([]);
+      setProgress(100);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      setSource(null);
+    } finally {
+      setLoading(false);
+      setTimeout(() => setProgress(0), 600);
+    }
   }
 
-  // altri errori → estrai messaggio leggibile
-  const msg =
-    typeof payload === "string"
-      ? payload
-      : payload?.message || data?.detail || `HTTP ${resp.status}`;
-  throw new Error(String(msg));
-}
+  async function analyzeManyURLs(paths: DemoPath[]) {
+    setLoading(true);
+    setError(null);
+    setRows([]);
+    setSummary([]);
+    setProgress(0);
+    try {
+      const parts = await Promise.all(
+        paths.map(async (p) => {
+          const resp = await fetch(`${API}/api/summary`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: p, include_rows: true }),
+          });
+          const data: unknown = await resp.json();
 
-    resetTables(data);
-    setIndexSuggestions([]); // pulisci eventuali suggerimenti precedenti
-    setProgress(100);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    setError(msg);
-    setSource(null);
-  } finally {
-    setLoading(false);
-    setTimeout(() => setProgress(0), 600);
-  }
-} // <-- ✅ QUESTA parentesi chiude analyzeURL
+          if (!resp.ok) {
+            const msg = (isApiErrorShape(data) && (data.detail || data.message)) || `Summary error for ${p}`;
+            throw new Error(String(msg));
+          }
 
-async function analyzeManyURLs(paths: DemoPath[]) {
-  setLoading(true);
-  setError(null);
-  setRows([]);
-  setSummary([]);
-  setProgress(0);
-  try {
-    const parts = await Promise.all(
-      paths.map(async (p) => {
-        const resp = await fetch(`${API}/api/summary`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: p, include_rows: true }),
-        });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data?.detail || `Summary error for ${p}`);
-        (data.rows ?? []).forEach((r: any) => (r.source = DEMO_LABEL[p]));
-        return data.rows ?? [];
-      })
-    );
-    const merged = parts.flat();
-    setAllRows(merged);
-    setAllSummary(summarizeClient(merged));
-    setRows(merged);
-    setSummary(summarizeClient(merged));
-    setSource({ kind: "demo", path: paths[0] });
-    setProgress(100);
-  } catch (e: any) {
-    setError(e.message || String(e));
-    setSource(null);
-  } finally {
-    setLoading(false);
-    setTimeout(() => setProgress(0), 600);
+          const payload: ApiSummaryResponse = isApiSummaryShape(data) ? data : { rows: [], summary: [] };
+          const rs = (payload.rows ?? []).map((r) => ({ ...r, source: DEMO_LABEL[p] }));
+          return rs;
+        })
+      );
+      const merged = parts.flat();
+      setAllRows(merged);
+      setAllSummary(summarizeClient(merged));
+      setRows(merged);
+      setSummary(summarizeClient(merged));
+      setSource({ kind: "demo", path: paths[0] });
+      setProgress(100);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      setSource(null);
+    } finally {
+      setLoading(false);
+      setTimeout(() => setProgress(0), 600);
+    }
   }
-}
 
   /* ---------- Derived ---------- */
   const filteredSortedRows = useMemo(() => {
@@ -556,9 +598,8 @@ async function analyzeManyURLs(paths: DemoPath[]) {
     setSumSortKey(k);
   };
 
-    /* ---------- CSV exports ---------- */
+  /* ---------- CSV exports ---------- */
   function exportRowsCSV() {
-    // stesso header che avevi già in prod (non tocchiamo le colonne)
     const headerKeys: (keyof Row)[] = [
       "provider_name",
       "code_type",
@@ -585,23 +626,9 @@ async function analyzeManyURLs(paths: DemoPath[]) {
   }
 
   function exportSummaryCSV() {
-    const header = [
-      "code",
-      "description",
-      "count",
-      "min",
-      "median",
-      "p25",
-      "p75",
-      "max",
-      "top1",
-      "top2",
-      "top3",
-    ];
+    const header = ["code", "description", "count", "min", "median", "p25", "p75", "max", "top1", "top2", "top3"];
     const lines = filteredSortedSummary.map((s) => {
-      const tops = (s.top3 ?? []).map(
-        (t) => `${t.provider_name} ($${Number(t.negotiated_rate ?? 0).toFixed(2)})`
-      );
+      const tops = (s.top3 ?? []).map((t) => `${t.provider_name} ($${Number(t.negotiated_rate ?? 0).toFixed(2)})`);
       return [
         s.code,
         `"${String(s.description ?? "").replace(/"/g, '""')}"`,
@@ -628,7 +655,7 @@ async function analyzeManyURLs(paths: DemoPath[]) {
   const SourceBadge = () => {
     if (!source) return null;
     let label = "";
-    if (source.kind === "demo") label = source.path.endsWith(".csv") ? "DEMO CSV" : "DEMO JSON";
+    if (source.kind === "demo") label = (source.path.endsWith(".csv") ? "DEMO CSV" : "DEMO JSON");
     if (source.kind === "upload") label = `Uploaded • ${source.name}`;
     if (source.kind === "url") label = `URL • ${source.href}`;
     return (
@@ -699,9 +726,7 @@ async function analyzeManyURLs(paths: DemoPath[]) {
               type="button"
               onClick={() => analyzeURL("/data/sample_hospital_mrf.csv")}
               className={`px-3 py-2 rounded border transition ${
-                isActiveDemo(source, "/data/sample_hospital_mrf.csv")
-                  ? "bg-blue-600 border-blue-500 text-white"
-                  : "hover:bg-white/10"
+                isActiveDemo(source, "/data/sample_hospital_mrf.csv") ? "bg-blue-600 border-blue-500 text-white" : "hover:bg/white/10"
               }`}
             >
               Demo A (CSV)
@@ -711,9 +736,7 @@ async function analyzeManyURLs(paths: DemoPath[]) {
               type="button"
               onClick={() => analyzeURL("/data/sample_hospital_mrf_plan_b.csv")}
               className={`px-3 py-2 rounded border transition ${
-                isActiveDemo(source, "/data/sample_hospital_mrf_plan_b.csv")
-                  ? "bg-blue-600 border-blue-500 text-white"
-                  : "hover:bg-white/10"
+                isActiveDemo(source, "/data/sample_hospital_mrf_plan_b.csv") ? "bg-blue-600 border-blue-500 text-white" : "hover:bg-white/10"
               }`}
             >
               Demo B (CSV)
@@ -723,9 +746,7 @@ async function analyzeManyURLs(paths: DemoPath[]) {
               type="button"
               onClick={() => analyzeURL("/data/sample_hospital_mrf_plan_c.json")}
               className={`px-3 py-2 rounded border transition ${
-                isActiveDemo(source, "/data/sample_hospital_mrf_plan_c.json")
-                  ? "bg-blue-600 border-blue-500 text-white"
-                  : "hover:bg-white/10"
+                isActiveDemo(source, "/data/sample_hospital_mrf_plan_c.json") ? "bg-blue-600 border-blue-500 text-white" : "hover:bg-white/10"
               }`}
             >
               Demo C (JSON)
@@ -734,11 +755,7 @@ async function analyzeManyURLs(paths: DemoPath[]) {
             <button
               type="button"
               onClick={() =>
-                analyzeManyURLs([
-                  "/data/sample_hospital_mrf.csv",
-                  "/data/sample_hospital_mrf_plan_b.csv",
-                  "/data/sample_hospital_mrf_plan_c.json",
-                ])
+                analyzeManyURLs(["/data/sample_hospital_mrf.csv", "/data/sample_hospital_mrf_plan_b.csv", "/data/sample_hospital_mrf_plan_c.json"])
               }
               className="px-3 py-2 rounded border hover:bg-white/10"
             >
@@ -766,39 +783,36 @@ async function analyzeManyURLs(paths: DemoPath[]) {
                 onChange={(e) => setUrl(e.target.value)}
                 placeholder="CSV/JSON URL or local path (e.g., /data/sample_hospital_mrf.csv)"
               />
-              {indexSuggestions.length > 0 && (
-  <div className="mt-3 space-y-2 rounded-lg border border-yellow-500/40 bg-yellow-500/10 p-3">
-    <div className="text-sm font-medium">This looks like a CMS index. Pick an in-network file:</div>
-    <div className="flex flex-wrap gap-2">
-      {indexSuggestions.map((u, i) => (
-        <button
-          key={u + i}
-          type="button"
-          onClick={() => analyzeURL(u)}
-          className="text-xs px-3 py-2 rounded border hover:bg-white/10 truncate max-w-full"
-          title={u}
-        >
-          {u}
-        </button>
-      ))}
-    </div>
-    <div className="pt-1">
-      <button
-        type="button"
-        onClick={() => setIndexSuggestions([])}
-        className="text-xs underline opacity-80 hover:opacity-100"
-      >
-        Dismiss suggestions
-      </button>
-    </div>
-  </div>
-)}
 
-              <button
-                type="button"
-                onClick={() => url && analyzeURL(url)}
-                className="px-3 py-2 rounded bg-blue-600 text-white"
-              >
+              {indexSuggestions.length > 0 && (
+                <div className="mt-3 space-y-2 rounded-lg border border-yellow-500/40 bg-yellow-500/10 p-3">
+                  <div className="text-sm font-medium">This looks like a CMS index. Pick an in-network file:</div>
+                  <div className="flex flex-wrap gap-2">
+                    {indexSuggestions.map((u, i) => (
+                      <button
+                        key={u + i}
+                        type="button"
+                        onClick={() => analyzeURL(u)}
+                        className="text-xs px-3 py-2 rounded border hover:bg-white/10 truncate max-w-full"
+                        title={u}
+                      >
+                        {u}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setIndexSuggestions([])}
+                      className="text-xs underline opacity-80 hover:opacity-100"
+                    >
+                      Dismiss suggestions
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <button type="button" onClick={() => url && analyzeURL(url)} className="px-3 py-2 rounded bg-blue-600 text-white">
                 Analyze
               </button>
             </div>
@@ -912,7 +926,9 @@ async function analyzeManyURLs(paths: DemoPath[]) {
                   Reset
                 </button>
               </div>
-              <div className="text-xs opacity-70">Showing {filteredSortedSummary.length} of {summary.length}</div>
+              <div className="text-xs opacity-70">
+                Showing {filteredSortedSummary.length} of {summary.length}
+              </div>
             </div>
 
             <div className="overflow-x-auto border rounded">
@@ -960,7 +976,8 @@ async function analyzeManyURLs(paths: DemoPath[]) {
                         <ul className="space-y-1">
                           {(s.top3 || []).map((t, i) => (
                             <li key={i} className="text-slate-300">
-                              <span className="font-medium text-slate-100">{t.provider_name}</span> — {currency(t.negotiated_rate)}
+                              <span className="font-medium text-slate-100">{t.provider_name}</span> —{" "}
+                              {currency(t.negotiated_rate)}
                             </li>
                           ))}
                         </ul>
