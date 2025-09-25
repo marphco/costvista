@@ -381,7 +381,6 @@ function clearResults() {
   setCodeChips([]); setProcQuery(""); setDebouncedQ("");
 }
 
-
 useEffect(() => {
   if (!allRows.length) return;
 

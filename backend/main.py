@@ -1,9 +1,9 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form # type: ignore
+from fastapi.middleware.cors import CORSMiddleware # type: ignore
+from pydantic import BaseModel # type: ignore
 from typing import List, Dict, Any, Optional
 from pathlib import Path
-import os, csv, io, json, httpx, asyncio
+import os, csv, io, json, httpx, asyncio # type: ignore
 
 app = FastAPI(title="Costvista API")
 
