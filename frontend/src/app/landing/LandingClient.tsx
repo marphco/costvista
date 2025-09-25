@@ -450,7 +450,6 @@ function Step2Card() {
         <div className="flex flex-wrap gap-2">
           <Chip>70551 · MRI brain</Chip>
           <Chip>66984 · Cataract surgery</Chip>
-          {/* <Chip>74177 · CT abdomen/pelvis</Chip> */}
         </div>
         <div className="mt-3 grid grid-cols-3 gap-3 text-xs">
           <div className="rounded-lg border border-white/10 bg-black/30 p-3">

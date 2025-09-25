@@ -1,44 +1,36 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-import os, re
-from pydantic import BaseModel, AnyHttpUrl
-from typing import List, Dict, Any
-import csv, io, json, httpx, os
+from pydantic import BaseModel
+from typing import List, Dict, Any, Optional
 from pathlib import Path
+import os, csv, io, json, httpx, asyncio
 
 app = FastAPI(title="Costvista API")
 
-# Leggi origini consentite da env (virgola-separate)
-# Esempio consigliato in Railway:
-# CORS_ORIGINS=https://tuo-progetto.vercel.app,https://tuo-progetto-git-*.vercel.app,http://localhost:3000
-raw = os.getenv("CORS_ORIGINS", "http://localhost:3000")
-origins = [o.strip() for o in raw.split(",") if o.strip()]
-
-# Se vuoi permettere le preview su Vercel con wildcard, usa allow_origin_regex
-# (Vercel preview tipica: https://<branch>-<project>-<hash>.vercel.app)
-vercel_preview_regex = r"^https:\/\/.*\.vercel\.app$"
-
+# ---------------- CORS ----------------
+# Consente localhost in dev e *.vercel.app in prod/preview.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o for o in origins if not o.endswith(".vercel.app")],  # esatte
-    allow_origin_regex=vercel_preview_regex,  # wildcard per tutte le preview
+    allow_origins=[],  # usiamo la regex sotto
+    allow_origin_regex=r"^(https?:\/\/localhost(:\d+)?|https:\/\/.*\.vercel\.app)$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-class ParseReq(BaseModel):
-    url: str  # accetta sia http(s) sia path locale tipo /data/...
-    codes: List[str] = []
+# --------------- Health ---------------
+@app.get("/health")
+def health():
+    return {"ok": True}
 
+# ------------- Helpers ---------------
 async def read_text(url_or_path: str) -> str:
-    # http/https → fetch
-    if url_or_path.lower().startswith(("http://","https://")):
-        async with httpx.AsyncClient(timeout=60) as client:
+    """Legge un file remoto (http/https) o locale da ./public"""
+    if url_or_path.lower().startswith(("http://", "https://")):
+        async with httpx.AsyncClient(timeout=120) as client:
             r = await client.get(url_or_path)
             r.raise_for_status()
             return r.text
-    # locale → leggi da ./public come nel frontend
     rel = url_or_path.lstrip("/")
     base = Path(__file__).resolve().parent / "public"
     fp = base / rel
@@ -46,255 +38,249 @@ async def read_text(url_or_path: str) -> str:
         raise HTTPException(404, f"Local file not found: {fp}")
     return fp.read_text(encoding="utf-8")
 
+def _coerce_float(val) -> float:
+    try:
+        if isinstance(val, str):
+            v = val.replace("$", "").replace(",", "").strip()
+            if v == "" or v.lower() == "nan":
+                return 0.0
+            return float(v)
+        return float(val or 0)
+    except Exception:
+        return 0.0
+
+def _pick_key(d: Dict[str, Any], candidates) -> Optional[str]:
+    low = {k.lower(): k for k in d.keys()}
+    for c in candidates:
+        k = low.get(c.lower())
+        if k:
+            return k
+    return None
+
 def parse_csv(text: str) -> List[Dict[str, Any]]:
-    lines = text.strip().splitlines()
-    reader = csv.DictReader(io.StringIO("\n".join(lines)))
-    rows = []
+    reader = csv.DictReader(io.StringIO(text))
+    rows: List[Dict[str, Any]] = []
     for row in reader:
-        try:
-            row["negotiated_rate"] = float(row.get("negotiated_rate") or 0)
-        except Exception:
-            row["negotiated_rate"] = 0.0
+        # negotiated_rate
+        rate_key = _pick_key(row, [
+            "negotiated_rate", "allowed_amount", "allowed",
+            "price", "rate", "amount", "ALLOWED_AMOUNT", "ALLOWED"
+        ])
+        row["negotiated_rate"] = _coerce_float(row.get(rate_key)) if rate_key else 0.0
+
+        # code
+        code_key = _pick_key(row, ["code", "cpt", "drg", "billing_code", "hcpcs", "cpt_code", "BILLING_CODE", "HCPCS"])
+        if code_key:
+            row["code"] = str(row.get(code_key))
+
+        # description
+        desc_key = _pick_key(row, ["description", "name", "procedure", "DESCRIPTION", "NAME", "PROCEDURE"])
+        if desc_key:
+            row["description"] = str(row.get(desc_key))
+
+        # provider name
+        prov_key = _pick_key(row, ["provider_name", "reporting_entity_name", "PROVIDER_NAME", "REPORTING_ENTITY_NAME"])
+        if prov_key:
+            row["provider_name"] = str(row.get(prov_key))
+
+        # rate type
+        type_key = _pick_key(row, ["rate_type", "billing_class", "RATE_TYPE", "BILLING_CLASS"])
+        if type_key:
+            row["rate_type"] = str(row.get(type_key))
+
         rows.append(row)
     return rows
 
-@app.post("/api/parse")
-async def parse(req: ParseReq):
-    text = await read_text(req.url)
-    rows: List[Dict[str, Any]] = []
-    if req.url.endswith(".csv") or ".csv" in req.url:
-        rows = parse_csv(text)
-    elif req.url.endswith(".json") or ".json" in req.url:
-        data = json.loads(text)
-        if not isinstance(data, list):
-            raise HTTPException(400, "JSON must be an array for MVP.")
-        rows = data
-    else:
-        raise HTTPException(400, "Unsupported file type. Use .csv or .json")
+def _coerce_negotiated_rate(rows: List[Dict[str, Any]]) -> None:
+    for r in rows:
+        if isinstance(r, dict):
+            r["negotiated_rate"] = _coerce_float(r.get("negotiated_rate"))
 
-    if req.codes:
-        code_set = set(map(str, req.codes))
-        rows = [r for r in rows if str(r.get("code")) in code_set]
-    return {"count": len(rows), "rows": rows}
+def _find_first_array_of_objects(obj: Any) -> Optional[List[Dict[str, Any]]]:
+    """
+    Accetta:
+      - array puro [ {...}, ... ]
+      - { data: [ {...} ] }
+      - qualunque oggetto che contenga come PRIMO valore una lista di oggetti
+      - NDJSON (una riga = un oggetto JSON)
+    """
+    if isinstance(obj, list) and (len(obj) == 0 or isinstance(obj[0], dict)):
+        return obj
 
-class SummaryReq(BaseModel):
-    url: str               # http(s) o path locale /data/...
-    codes: List[str] = []  # opzionale: filtra i codici
-    include_rows: bool = True  # se vuoi tornare anche le righe grezze
+    if isinstance(obj, dict):
+        if isinstance(obj.get("data"), list) and (len(obj["data"]) == 0 or isinstance(obj["data"][0], dict)):
+            return obj["data"]
+        for _, v in obj.items():
+            if isinstance(v, list) and (len(v) == 0 or isinstance(v[0], dict)):
+                return v
+
+    if isinstance(obj, str):
+        lines = [ln.strip() for ln in obj.splitlines() if ln.strip()]
+        try:
+            rows = [json.loads(ln) for ln in lines]
+            if rows and isinstance(rows[0], dict):
+                return rows
+        except Exception:
+            pass
+
+    return None
 
 def _median(nums: List[float]) -> float:
     if not nums: return 0.0
-    s = sorted(nums)
-    n = len(s); m = n // 2
+    s = sorted(nums); n = len(s); m = n // 2
     return float(s[m]) if n % 2 else (s[m-1] + s[m]) / 2.0
 
 def _percentile(nums: List[float], p: float) -> float:
     if not nums: return 0.0
     s = sorted(nums)
     if len(s) == 1: return float(s[0])
-    # interpolazione semplice
     k = (len(s) - 1) * (p / 100.0)
     f = int(k); c = min(f + 1, len(s) - 1)
     if f == c: return float(s[int(k)])
     return float(s[f] + (s[c] - s[f]) * (k - f))
 
-@app.post("/api/summary")
-async def summary(req: SummaryReq):
-    # 1) leggi e parse come in /api/parse
+def _summarize(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    by_code: Dict[str, List[Dict[str, Any]]] = {}
+    for r in rows:
+        code = str(r.get("code", "")).strip()
+        if not code: continue
+        by_code.setdefault(code, []).append(r)
+
+    out = []
+    for code, items in by_code.items():
+        vals = [float(i.get("negotiated_rate") or 0) for i in items]
+        if not vals: continue
+        desc = next((str(i.get("description") or "").strip() for i in items if str(i.get("description") or "")), "")
+        top3 = sorted(
+            [{"provider_name": str(i.get("provider_name") or ""), "negotiated_rate": float(i.get("negotiated_rate") or 0)} for i in items],
+            key=lambda x: x["negotiated_rate"]
+        )[:3]
+        out.append({
+            "code": code, "description": desc, "count": len(vals),
+            "min": float(min(vals)), "median": _median(vals),
+            "p25": _percentile(vals, 25), "p75": _percentile(vals, 75),
+            "max": float(max(vals)), "top3": top3
+        })
+    out.sort(key=lambda s: s["code"])
+    return {"summary": out, "rows": rows, "count": len(rows)}
+
+# --------------- Schemi ---------------
+class ParseReq(BaseModel):
+    url: str
+    codes: List[str] = []
+
+class SummaryReq(BaseModel):
+    url: str
+    codes: List[str] = []
+    include_rows: bool = True
+
+# --------------- Routes ---------------
+@app.post("/api/parse")
+async def parse(req: ParseReq):
     text = await read_text(req.url)
     if req.url.endswith(".csv") or ".csv" in req.url:
         rows = parse_csv(text)
     elif req.url.endswith(".json") or ".json" in req.url:
-        data = json.loads(text)
-        if not isinstance(data, list):
-            raise HTTPException(400, "JSON must be an array for MVP.")
-        rows = data
+        try:
+            obj = json.loads(text)
+        except json.JSONDecodeError:
+            rows = _find_first_array_of_objects(text) or []
+            if not rows:
+                raise HTTPException(400, "Invalid JSON.")
+        else:
+            rows = _find_first_array_of_objects(obj) or []
+            if not rows:
+                raise HTTPException(400, "Expected an array of objects or { data: [...] }.")
     else:
         raise HTTPException(400, "Unsupported file type. Use .csv or .json")
 
-    # 2) filtra codici (se forniti)
-    if req.codes:
+    if req.codes and rows and isinstance(rows[0], dict):
         code_set = set(map(str, req.codes))
         rows = [r for r in rows if str(r.get("code")) in code_set]
 
-    # 3) raggruppa per code e calcola stats
-    by_code: Dict[str, List[Dict[str, Any]]] = {}
-    for r in rows:
-        code = str(r.get("code", ""))
-        if not code: 
-            # salta righe senza code
-            continue
-        by_code.setdefault(code, []).append(r)
+    _coerce_negotiated_rate(rows)
+    return {"count": len(rows), "rows": rows}
 
-    summary_out = []
-    for code, items in by_code.items():
-        vals = [float(i.get("negotiated_rate") or 0) for i in items if i.get("negotiated_rate") is not None]
-        if not vals: 
-            continue
-        # descrizione: prendi la più frequente o la prima non vuota
-        desc = ""
-        for i in items:
-            d = str(i.get("description") or "").strip()
-            if d: 
-                desc = d; break
-
-        # top-3 provider più economici
-        top3 = sorted(
-            [
-                {
-                    "provider_name": str(i.get("provider_name") or ""),
-                    "negotiated_rate": float(i.get("negotiated_rate") or 0),
-                }
-                for i in items
-                if i.get("negotiated_rate") is not None
-            ],
-            key=lambda x: x["negotiated_rate"],
-        )[:3]
-
-        summary_out.append({
-            "code": code,
-            "description": desc,
-            "count": len(vals),
-            "min": float(min(vals)),
-            "median": _median(vals),
-            "p25": _percentile(vals, 25),
-            "p75": _percentile(vals, 75),
-            "max": float(max(vals)),
-            "top3": top3,
-        })
-
-    # ordina per code
-    summary_out.sort(key=lambda s: s["code"])
-
-    resp = {"summary": summary_out}
-    if req.include_rows:
-        resp["rows"] = rows
-        resp["count"] = len(rows)
-    return resp
-
-# --- PATCH: upload endpoint per CSV/JSON (50MB, 30s timeout) ---
-from fastapi import File, UploadFile, Form
-import asyncio, uuid
-
-MAX_SIZE_BYTES = 50 * 1024 * 1024  # 50MB
-ALLOWED_TYPES = {"text/csv", "application/json"}
-
-def _sanitize_filename(name: str) -> str:
-    base = name.split("/")[-1].split("\\")[-1]
-    return "".join(ch for ch in base if ch.isalnum() or ch in ("-", "_", ".", " ")).strip()[:128]
-
-def _parse_csv_bytes(data: bytes, codes: List[str]) -> Dict[str, Any]:
-    text = data.decode("utf-8", errors="replace")
-    reader = csv.DictReader(io.StringIO(text))
-    rows: List[Dict[str, Any]] = []
-    for row in reader:
-        # coerci negotiated_rate a float, ma non esplodere se vuoto
+@app.post("/api/summary")
+async def summary(req: SummaryReq):
+    text = await read_text(req.url)
+    if req.url.endswith(".csv") or ".csv" in req.url:
+        rows = parse_csv(text)
+    elif req.url.endswith(".json") or ".json" in req.url:
         try:
-            row["negotiated_rate"] = float(row.get("negotiated_rate") or 0)
-        except Exception:
-            row["negotiated_rate"] = 0.0
-        rows.append(row)
-
-    if codes:
-        code_set = set(map(str, codes))
-        # prova a trovare una colonna plausibile
-        # se non c'è 'code', prova 'cpt' o 'drg'
-        if rows:
-            keys = {k.lower(): k for k in rows[0].keys()}
-            code_key = keys.get("code") or keys.get("cpt") or keys.get("drg")
+            obj = json.loads(text)
+        except json.JSONDecodeError:
+            rows = _find_first_array_of_objects(text) or []
+            if not rows:
+                raise HTTPException(400, "Invalid JSON.")
         else:
-            code_key = None
-        if code_key:
-            rows = [r for r in rows if str(r.get(code_key)) in code_set]
-
-    return {
-        "detectedType": "csv",
-        "rowCount": len(rows),
-        "sample": rows[:5],
-    }
-
-def _parse_json_bytes(data: bytes, codes: List[str]) -> Dict[str, Any]:
-    try:
-        obj = json.loads(data.decode("utf-8", errors="replace"))
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="JSON non valido")
-
-    # accettiamo array puro o { data: [...] }
-    if isinstance(obj, dict) and isinstance(obj.get("data"), list):
-        rows = obj["data"]
-    elif isinstance(obj, list):
-        rows = obj
+            rows = _find_first_array_of_objects(obj) or []
+            if not rows:
+                raise HTTPException(400, "Expected an array of objects or { data: [...] }.")
     else:
-        raise HTTPException(status_code=400, detail="Atteso array di oggetti o { data: [...] }")
+        raise HTTPException(400, "Unsupported file type. Use .csv or .json")
 
-    # filtra se richiesto su chiave 'code'/'cpt'/'drg'
+    if req.codes and rows and isinstance(rows[0], dict):
+        code_set = set(map(str, req.codes))
+        rows = [r for r in rows if str(r.get("code")) in code_set]
+
+    _coerce_negotiated_rate(rows)
+    res = _summarize(rows)
+    if not req.include_rows:
+        res.pop("rows", None)
+    return res
+
+# -------- Upload (50MB) --------
+MAX_SIZE_BYTES = 50 * 1024 * 1024
+
+@app.post("/api/summary_upload")
+async def summary_upload(
+    file: UploadFile = File(...),
+    codes: List[str] = Form(default=[]),
+    include_rows: bool = Form(default=True),
+):
+    total = 0
+    chunks: List[bytes] = []
+    while True:
+        chunk = await file.read(1024 * 1024)  # 1MB
+        if not chunk: break
+        total += len(chunk)
+        if total > MAX_SIZE_BYTES:
+            raise HTTPException(413, "File too large (limit 50MB).")
+        chunks.append(chunk)
+    data = b"".join(chunks)
+    text = data.decode("utf-8", errors="replace")
+    name = (file.filename or "").lower()
+
+    # parse
+    if file.content_type == "text/csv" or name.endswith(".csv"):
+        rows = parse_csv(text)
+    else:
+        try:
+            obj = json.loads(text)
+        except json.JSONDecodeError:
+            rows = _find_first_array_of_objects(text) or []
+            if not rows:
+                raise HTTPException(400, "Invalid JSON.")
+        else:
+            rows = _find_first_array_of_objects(obj) or []
+            if not rows:
+                raise HTTPException(
+                    400,
+                    "Expected an array, { data: [...] }, any object with a first array of objects, or NDJSON."
+                )
+
     if codes and rows and isinstance(rows[0], dict):
         code_set = set(map(str, codes))
         def _match(r: Dict[str, Any]) -> bool:
-            for k in ("code", "cpt", "drg"):
+            for k in ("code", "cpt", "drg", "billing_code", "hcpcs", "cpt_code"):
                 if k in r and str(r.get(k)) in code_set:
                     return True
             return False
         rows = [r for r in rows if _match(r)]
 
-    # coerci negotiated_rate se presente
-    for r in rows:
-        if isinstance(r, dict):
-            try:
-                r["negotiated_rate"] = float(r.get("negotiated_rate") or 0)
-            except Exception:
-                r["negotiated_rate"] = 0.0
-
-    return {
-        "detectedType": "json",
-        "rowCount": len(rows),
-        "sample": rows[:5] if isinstance(rows, list) else [],
-    }
-
-@app.post("/api/upload")
-async def upload_file(
-    file: UploadFile = File(...),
-    codes: List[str] = Form(default=[])
-):
-    """
-    Multipart upload:
-      - field "file": CSV o JSON (max 50MB)
-      - field ripetibile "codes": opzionale (CPT/DRG)
-    Output: { fileId, originalName, detectedType, rowCount, sample }
-    """
-    async def _handle():
-        if file.content_type not in ALLOWED_TYPES:
-            raise HTTPException(status_code=415, detail=f"Content-Type non supportato: {file.content_type}")
-
-        # leggi in chunk per rispettare MAX_SIZE_BYTES
-        total = 0
-        chunks: List[bytes] = []
-        while True:
-            chunk = await file.read(1024 * 1024)  # 1MB
-            if not chunk:
-                break
-            total += len(chunk)
-            if total > MAX_SIZE_BYTES:
-                raise HTTPException(status_code=413, detail="File troppo grande (limite 50MB)")
-            chunks.append(chunk)
-        data = b"".join(chunks)
-
-        safe_name = _sanitize_filename(file.filename or "upload")
-        file_id = f"tmp_{uuid.uuid4().hex}"
-
-        if file.content_type == "text/csv":
-            result = _parse_csv_bytes(data, codes)
-        else:
-            result = _parse_json_bytes(data, codes)
-
-        return {
-            "fileId": file_id,
-            "originalName": safe_name,
-            **result
-        }
-
-    try:
-        # timeout end-to-end 30s
-        return await asyncio.wait_for(_handle(), timeout=30.0)
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=408, detail="Timeout parsing (30s)")
+    _coerce_negotiated_rate(rows)
+    res = _summarize(rows)
+    if not include_rows:
+        res.pop("rows", None)
+    return res

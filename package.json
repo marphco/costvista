@@ -2,10 +2,10 @@
   "name": "costvista",
   "version": "1.0.0",
   "main": "index.js",
-   "scripts": {
+    "scripts": {
+    "dev": "concurrently -k -n FRONT,BACK -c auto \"npm:dev:frontend\" \"npm:dev:backend\"",
     "dev:frontend": "npm run dev --prefix frontend",
-    "dev:backend": "bash -lc 'cd backend && .venv/bin/uvicorn main:app --reload --port 8000'",
-    "dev": "concurrently -k -n FRONT,BACK -c auto \"npm:dev:frontend\" \"npm:dev:backend\""
+    "dev:backend": "bash -lc 'cd backend && source .venv/bin/activate && python -m uvicorn main:app --reload --port 8000'"
   },
   "keywords": [],
   "author": "",
