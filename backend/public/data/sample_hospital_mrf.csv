@@ -1,11 +1,10 @@
-provider_name,code_type,code,description,rate_type,negotiated_rate,geo,last_updated
-General Hospital,CPT,70551,MRI brain without contrast,in_network_negotiated,800,NY-NYC,2025-08-01
-General Hospital,CPT,74177,CT abdomen/pelvis with contrast,in_network_negotiated,1199.5,NY-NYC,2025-08-01
-General Hospital,CPT,45378,Colonoscopy diagnostic,in_network_negotiated,658,NY-NYC,2025-08-01
-General Hospital,CPT,66984,Cataract surgery,in_network_negotiated,2900,NY-NYC,2025-08-01
-General Hospital,DRG,775,Vaginal delivery w/o complicating diagnoses,in_network_negotiated,7400,NY-NYC,2025-08-01
-Metro Medical Center,CPT,70551,MRI brain without contrast,in_network_negotiated,910,NY-NYC,2025-08-01
-Metro Medical Center,CPT,74177,CT abdomen/pelvis with contrast,in_network_negotiated,1260,NY-NYC,2025-08-01
-Metro Medical Center,CPT,45378,Colonoscopy diagnostic,in_network_negotiated,720,NY-NYC,2025-08-01
-Metro Medical Center,CPT,66984,Cataract surgery,in_network_negotiated,3100,NY-NYC,2025-08-01
-Metro Medical Center,DRG,775,Vaginal delivery w/o complicating diagnoses,in_network_negotiated,7800,NY-NYC,2025-08-01
+provider_name,code,description,rate_type,negotiated_rate,geo,last_updated
+Zelis,70551,MRI brain without contrast,In-Network,520.00,MA,2025-08-01
+OptiHealth,70551,MRI brain without contrast,In-Network,480.00,MA,2025-08-01
+Acme Health,70551,MRI brain without contrast,Out-of-Network,650.00,MA,2025-08-01
+Zelis,74177,CT abdomen/pelvis with contrast,In-Network,780.00,MA,2025-08-01
+OptiHealth,74177,CT abdomen/pelvis with contrast,In-Network,720.00,MA,2025-08-01
+Acme Health,74177,CT abdomen/pelvis with contrast,Out-of-Network,980.00,MA,2025-08-01
+Zelis,45378,Colonoscopy (diagnostic),In-Network,430.00,MA,2025-08-01
+OptiHealth,45378,Colonoscopy (diagnostic),In-Network,410.00,MA,2025-08-01
+Acme Health,45378,Colonoscopy (diagnostic),Out-of-Network,560.00,MA,2025-08-01

@@ -1,0 +1,15 @@
+{
+  "data": [
+    { "payer": "Unity Health",   "code": "70551", "service": "MRI brain without contrast", "network": "In",  "allowed_amount": "490.00", "geo": "MA", "last_updated": "2025-08-01" },
+    { "payer": "Horizon Benefit","code": "70551", "service": "MRI brain without contrast", "network": "In",  "allowed_amount": "515.00", "geo": "MA", "last_updated": "2025-08-01" },
+    { "payer": "Zelis",          "code": "70551", "service": "MRI brain without contrast", "network": "Out", "allowed_amount": "700.00", "geo": "MA", "last_updated": "2025-08-01" },
+
+    { "payer": "Unity Health",   "code": "74177", "service": "CT abdomen/pelvis with contrast", "network": "In",  "allowed_amount": "740.00", "geo": "MA", "last_updated": "2025-08-01" },
+    { "payer": "Horizon Benefit","code": "74177", "service": "CT abdomen/pelvis with contrast", "network": "In",  "allowed_amount": "760.00", "geo": "MA", "last_updated": "2025-08-01" },
+    { "payer": "Zelis",          "code": "74177", "service": "CT abdomen/pelvis with contrast", "network": "Out", "allowed_amount": "995.00", "geo": "MA", "last_updated": "2025-08-01" },
+
+    { "payer": "Unity Health",   "code": "45378", "service": "Colonoscopy (diagnostic)", "network": "In",  "allowed_amount": "415.00", "geo": "MA", "last_updated": "2025-08-01" },
+    { "payer": "Horizon Benefit","code": "45378", "service": "Colonoscopy (diagnostic)", "network": "In",  "allowed_amount": "420.00", "geo": "MA", "last_updated": "2025-08-01" },
+    { "payer": "Zelis",          "code": "45378", "service": "Colonoscopy (diagnostic)", "network": "Out", "allowed_amount": "565.00", "geo": "MA", "last_updated": "2025-08-01" }
+  ]
+}
