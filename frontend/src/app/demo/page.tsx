@@ -1,4 +1,3 @@
-// frontend/src/app/demo/page.tsx
 // src/app/demo/page.tsx
 "use client";
 
@@ -7,8 +6,36 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 /* ============================
+   Demo paths (unica fonte)
+============================ */
+export const DEMO_PATHS = [
+  "/data/sample_hospital_mrf.csv",          // Plan A (CSV)
+  "/data/sample_hospital_mrf.json",         // Plan A (JSON)
+  "/data/sample_hospital_mrf_plan_b.csv",   // Plan B (CSV)
+  "/data/sample_hospital_mrf_plan_c.json",  // Plan C (JSON)
+] as const;
+
+type DemoPath = typeof DEMO_PATHS[number];
+
+const DEMO_LABEL: Record<DemoPath, string> = {
+  "/data/sample_hospital_mrf.csv": "Plan A (CSV)",
+  "/data/sample_hospital_mrf.json": "Plan A (JSON)",
+  "/data/sample_hospital_mrf_plan_b.csv": "Plan B (CSV)",
+  "/data/sample_hospital_mrf_plan_c.json": "Plan C (JSON)",
+};
+
+function isDemoPath(x: string): x is DemoPath {
+  return (DEMO_PATHS as readonly string[]).includes(x);
+}
+
+/* ============================
    Types
 ============================ */
+type Source =
+  | { kind: "upload"; name: string; size: number; type: string }
+  | { kind: "demo"; path: DemoPath }
+  | { kind: "url"; href: string };
+
 type Row = {
   provider_name?: string;
   code_type?: string;
@@ -18,6 +45,7 @@ type Row = {
   negotiated_rate: number;
   geo?: string;
   last_updated?: string;
+  source?: string; // tag della sorgente (aggiunto lato client)
   [k: string]: unknown;
 };
 
@@ -56,40 +84,35 @@ const COMMON_CPT: CodeItem[] = [
   { code: "99213", label: "Office/outpatient visit, established" },
 ];
 
-/* ============================
-   Page
-============================ */
-
-// ---- Helpers per i filtri pre-analisi ----
+// filtri pre-analisi
 const extractCodesFromText = (text: string): string[] => {
-  const found = (text.match(/\b\d{4,5}\b/g) || []);
+  const found = text.match(/\b\d{4,5}\b/g) || [];
   return Array.from(new Set(found));
 };
-
-const getCodesToSend = (chips: {code: string}[], currentQuery: string): string[] => {
-  const fromChips = chips.map(c => String(c.code));
+const getCodesToSend = (chips: { code: string }[], currentQuery: string): string[] => {
+  const fromChips = chips.map((c) => String(c.code));
   const fromQuery = extractCodesFromText(currentQuery);
   return Array.from(new Set([...fromChips, ...fromQuery]));
 };
 
-// ---- Helpers per riepilogo lato client (replica del backend) ----
+// riepilogo lato client (replica del backend)
 const median = (arr: number[]) => {
   if (!arr.length) return 0;
-  const s = [...arr].sort((a,b)=>a-b);
-  const n = s.length, m = Math.floor(n/2);
-  return n % 2 ? s[m] : (s[m-1] + s[m]) / 2;
+  const s = [...arr].sort((a, b) => a - b);
+  const n = s.length,
+    m = Math.floor(n / 2);
+  return n % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
-
 const percentile = (arr: number[], p: number) => {
   if (!arr.length) return 0;
-  const s = [...arr].sort((a,b)=>a-b);
+  const s = [...arr].sort((a, b) => a - b);
   if (s.length === 1) return s[0];
   const k = (s.length - 1) * (p / 100);
-  const f = Math.floor(k), c = Math.min(f + 1, s.length - 1);
+  const f = Math.floor(k),
+    c = Math.min(f + 1, s.length - 1);
   if (f === c) return s[f];
   return s[f] + (s[c] - s[f]) * (k - f);
 };
-
 const summarizeClient = (rows: Row[]): Summary[] => {
   const by: Record<string, Row[]> = {};
   for (const r of rows) {
@@ -100,12 +123,12 @@ const summarizeClient = (rows: Row[]): Summary[] => {
   const out: Summary[] = [];
   for (const code of Object.keys(by)) {
     const items = by[code];
-    const vals = items.map(i => Number(i.negotiated_rate ?? 0));
+    const vals = items.map((i) => Number(i.negotiated_rate ?? 0));
     if (!vals.length) continue;
-    const desc = (items.find(i => String(i.description ?? "").trim())?.description ?? "") as string;
+    const desc = (items.find((i) => String(i.description ?? "").trim())?.description ?? "") as string;
     const top3 = [...items]
-      .map(i => ({ provider_name: String(i.provider_name ?? ""), negotiated_rate: Number(i.negotiated_rate ?? 0) }))
-      .sort((a,b)=>a.negotiated_rate - b.negotiated_rate)
+      .map((i) => ({ provider_name: String(i.provider_name ?? ""), negotiated_rate: Number(i.negotiated_rate ?? 0) }))
+      .sort((a, b) => a.negotiated_rate - b.negotiated_rate)
       .slice(0, 3);
     out.push({
       code,
@@ -119,10 +142,12 @@ const summarizeClient = (rows: Row[]): Summary[] => {
       top3,
     });
   }
-  return out.sort((a,b)=>String(a.code).localeCompare(String(b.code), undefined, {numeric:true}));
+  return out.sort((a, b) => String(a.code).localeCompare(String(b.code), undefined, { numeric: true }));
 };
 
-
+/* ============================
+   Page Component
+============================ */
 export default function DemoPage() {
   /* ---------- Header ---------- */
   const Header = (
@@ -148,54 +173,11 @@ export default function DemoPage() {
   // API base (dev fallback per localhost)
   const API =
     process.env.NEXT_PUBLIC_API ||
-    (typeof window !== "undefined" && location.hostname === "localhost"
-      ? "http://localhost:8000"
-      : "");
+    (typeof window !== "undefined" && location.hostname === "localhost" ? "http://localhost:8000" : "");
 
-  /* ---------- Source ---------- */
- // ✅ percorsi consentiti per i demo
-type DemoPath = "/data/sample_hospital_mrf.csv" | "/data/sample_hospital_mrf.json";
-
-// ✅ union “discriminata”
-type Source =
-  | { kind: "upload"; name: string; size: number; type: string }
-  | { kind: "demo"; path: DemoPath }
-  | { kind: "url"; href: string };
-
-const [source, setSource] = useState<Source | null>(null);
-
-// ✅ type-guard per riconoscere i path demo
-function isDemoPath(x: string): x is DemoPath {
-  return x === "/data/sample_hospital_mrf.csv" || x === "/data/sample_hospital_mrf.json";
-}
-
-// ✅ helper senza errori di typing
-const isActiveDemo = (p: Source | null, path: DemoPath) =>
-  !!(p && p.kind === "demo" && p.path === path);
-
-  // Piccolo badge sempre visibile con la sorgente corrente
-  const SourceBadge = () => {
-    if (!source) return null;
-    let label = "";
-    if (source.kind === "demo") label = source.path.endsWith(".csv") ? "DEMO CSV" : "DEMO JSON";
-    if (source.kind === "upload") label = `Uploaded • ${source.name}`;
-    if (source.kind === "url") label = `URL • ${source.href}`;
-    return (
-      <div className="flex items-center gap-2 text-xs">
-        <span className="rounded-full bg-white/10 px-2 py-1">
-          Current source: <span className="font-medium">{label}</span>
-        </span>
-        <button
-  type="button"
-  className="underline opacity-80 hover:opacity-100"
-  onClick={clearResults}
-  aria-label="Clear current source and results"
->
-  Clear
-</button>
-      </div>
-    );
-  };
+  /* ---------- Source state (hooks dentro al componente!) ---------- */
+  const [source, setSource] = useState<Source | null>(null);
+  const isActiveDemo = (p: Source | null, path: DemoPath) => !!(p && p.kind === "demo" && p.path === path);
 
   /* ---------- Upload ---------- */
   const [uploading, setUploading] = useState(false);
@@ -219,8 +201,7 @@ const isActiveDemo = (p: Source | null, path: DemoPath) =>
     setError(null);
 
     const form = new FormData();
-form.append("file", file);
-// for (const c of getCodesToSend(codeChips, procQuery)) form.append("codes", c);
+    form.append("file", file);
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${API}/api/summary_upload`);
@@ -232,45 +213,67 @@ form.append("file", file);
       setUploading(false);
     };
     xhr.onload = () => {
-  try {
-    // Alcuni errori del backend arrivano come text/plain o HTML:
-    // proviamo JSON, altrimenti usiamo raw text.
-    let data: any = null;
-    try {
-      data = JSON.parse(xhr.responseText);
-    } catch {
-      data = { detail: xhr.responseText || "Server returned a non-JSON response." };
-    }
+      try {
+        let data: any = null;
+        try {
+          data = JSON.parse(xhr.responseText);
+        } catch {
+          data = { detail: xhr.responseText || "Server returned a non-JSON response." };
+        }
 
-    if (xhr.status >= 200 && xhr.status < 300) {
-      // payload atteso: { rows?: Row[], summary?: Summary[] }
-      resetTables(data);
-      setSource({ kind: "upload", name: file.name, size: file.size, type: file.type });
-      setProgress(100);
-    } else {
-      // surface dell’errore leggibile a UI
-      setUploadErr(
-        typeof data?.detail === "string" && data.detail.trim()
-          ? data.detail
-          : `Upload error (HTTP ${xhr.status}).`
-      );
-    }
-  } catch (e) {
-    setUploadErr("Unexpected error while reading the server response.");
-  } finally {
-    setUploading(false);
-    setTimeout(() => setProgress(0), 600);
-  }
-};
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resetTables(data);
+          setSource({ kind: "upload", name: file.name, size: file.size, type: file.type });
+          setProgress(100);
+        } else {
+          setUploadErr(
+            typeof data?.detail === "string" && data.detail.trim() ? data.detail : `Upload error (HTTP ${xhr.status}).`
+          );
+        }
+      } catch {
+        setUploadErr("Unexpected error while reading the server response.");
+      } finally {
+        setUploading(false);
+        setTimeout(() => setProgress(0), 600);
+      }
+    };
     xhr.send(form);
   }
 
-  function onUploadInputChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (f) handleFileUpload(f);
+  async function uploadOne(file: File): Promise<{ rows: Row[]; summary: Summary[] }> {
+    const form = new FormData();
+    form.append("file", file);
+    const resp = await fetch(`${API}/api/summary_upload`, { method: "POST", body: form });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data?.detail || "Upload error");
+    (data.rows ?? []).forEach((r: any) => (r.source = file.name));
+    return data;
   }
 
-  // Drag & drop
+  async function onUploadInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+
+    setUploading(true);
+    setError(null);
+    setProgress(0);
+    try {
+      const parts = await Promise.all(files.map(uploadOne));
+      const mergedRows = parts.flatMap((p) => p.rows ?? []);
+      setAllRows(mergedRows);
+      setAllSummary(summarizeClient(mergedRows));
+      setRows(mergedRows);
+      setSummary(summarizeClient(mergedRows));
+      setSource({ kind: "upload", name: `${files.length} files`, size: 0, type: "mixed" });
+    } catch (err: any) {
+      setError(err.message || String(err));
+    } finally {
+      setUploading(false);
+      setProgress(0);
+    }
+  }
+
+  // Drag & drop (usa upload singolo; il file input gestisce il multi)
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
     const f = e.dataTransfer.files?.[0];
@@ -364,7 +367,6 @@ form.append("file", file);
     setRows(rs);
     setSummary(sm);
 
-    // reset filtri
     setRowCodeQ("");
     setRowProviderQ("");
     setRowMinRate("");
@@ -378,88 +380,110 @@ form.append("file", file);
 
   const skipNextAuto = useRef(false);
 
-function clearResults() {
-  // reset anche della sorgente selezionata
-  setSource(null);
-
-  // svuota dataset e risultati
-  setAllRows([]);
-  setAllSummary([]);
-  setRows([]);
-  setSummary([]);
-
-  // reset UI state
-  setRowCodeQ(""); setRowProviderQ(""); setRowMinRate(""); setRowMaxRate("");
-  setRowSortKey("negotiated_rate"); setRowSortDir("asc");
-  setSumCodeQ(""); setSumSortKey("median"); setSumSortDir("asc");
-  setCodeChips([]); setProcQuery(""); setDebouncedQ("");
-}
-
-useEffect(() => {
-  if (!allRows.length) return;
-
-  if (skipNextAuto.current) {
-    skipNextAuto.current = false;
-    return;
+  function clearResults() {
+    setSource(null);
+    setAllRows([]);
+    setAllSummary([]);
+    setRows([]);
+    setSummary([]);
+    setRowCodeQ("");
+    setRowProviderQ("");
+    setRowMinRate("");
+    setRowMaxRate("");
+    setRowSortKey("negotiated_rate");
+    setRowSortDir("asc");
+    setSumCodeQ("");
+    setSumSortKey("median");
+    setSumSortDir("asc");
+    setCodeChips([]);
+    setProcQuery("");
+    setDebouncedQ("");
   }
 
-  const codes = getCodesToSend(codeChips, debouncedQ);
-  const target = codes.length
-    ? allRows.filter(r => codes.includes(String(r.code ?? "")))
-    : allRows;
-
-  setRows(codes.length ? target : [...allRows]);
-  setSummary(
-    codes.length
-      ? summarizeClient(target)
-      : (allSummary.length ? [...allSummary] : summarizeClient(allRows))
-  );
-}, [allRows, allSummary, codeChips, debouncedQ]);
-
+  useEffect(() => {
+    if (!allRows.length) return;
+    if (skipNextAuto.current) {
+      skipNextAuto.current = false;
+      return;
+    }
+    const codes = getCodesToSend(codeChips, debouncedQ);
+    const target = codes.length ? allRows.filter((r) => codes.includes(String(r.code ?? ""))) : allRows;
+    setRows(codes.length ? target : [...allRows]);
+    setSummary(codes.length ? summarizeClient(target) : allSummary.length ? [...allSummary] : summarizeClient(allRows));
+  }, [allRows, allSummary, codeChips, debouncedQ]);
 
   /* ---------- Analyze by URL / demo ---------- */
   const [showUrlBox, setShowUrlBox] = useState(false);
   const [url, setUrl] = useState("");
 
   async function analyzeURL(hrefOrLocalPath: string) {
-  // feedback immediato
-  if (isDemoPath(hrefOrLocalPath)) {
-    setSource({ kind: "demo", path: hrefOrLocalPath });
-  } else {
-    setSource({ kind: "url", href: hrefOrLocalPath });
+    if (isDemoPath(hrefOrLocalPath)) {
+      setSource({ kind: "demo", path: hrefOrLocalPath });
+    } else {
+      setSource({ kind: "url", href: hrefOrLocalPath });
+    }
+
+    setLoading(true);
+    setError(null);
+    setRows([]);
+    setSummary([]);
+    setProgress(0);
+
+    try {
+      const resp = await fetch(`${API}/api/summary`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: hrefOrLocalPath, include_rows: true }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.detail || "Summary error");
+      resetTables(data);
+      setProgress(100);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      setSource(null);
+    } finally {
+      setLoading(false);
+      setTimeout(() => setProgress(0), 600);
+    }
   }
 
-  setLoading(true);
-  setError(null);
-  setRows([]);
-  setSummary([]);
-  setProgress(0);
-
-  try {
-    // ⬇️ NON mandiamo codes: prendiamo il dataset pieno
-    const resp = await fetch(`${API}/api/summary`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        url: hrefOrLocalPath,
-        include_rows: true,
-        // codes: []  // <-- tolto
-      }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data?.detail || "Summary error");
-
-    resetTables(data);      // allRows pieno
-    setProgress(100);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    setError(msg);
-    setSource(null);
-  } finally {
-    setLoading(false);
-    setTimeout(() => setProgress(0), 600);
+  async function analyzeManyURLs(paths: DemoPath[]) {
+    setLoading(true);
+    setError(null);
+    setRows([]);
+    setSummary([]);
+    setProgress(0);
+    try {
+      const parts = await Promise.all(
+        paths.map(async (p) => {
+          const resp = await fetch(`${API}/api/summary`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: p, include_rows: true }),
+          });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.detail || `Summary error for ${p}`);
+          (data.rows ?? []).forEach((r: any) => (r.source = DEMO_LABEL[p]));
+          return data.rows ?? [];
+        })
+      );
+      const merged = parts.flat();
+      setAllRows(merged);
+      setAllSummary(summarizeClient(merged));
+      setRows(merged);
+      setSummary(summarizeClient(merged));
+      setSource({ kind: "demo", path: paths[0] });
+      setProgress(100);
+    } catch (e: any) {
+      setError(e.message || String(e));
+      setSource(null);
+    } finally {
+      setLoading(false);
+      setTimeout(() => setProgress(0), 600);
+    }
   }
-}
 
   /* ---------- Derived ---------- */
   const filteredSortedRows = useMemo(() => {
@@ -498,7 +522,6 @@ useEffect(() => {
 
   const headerBtn = (label: string, active: boolean, dir: Dir) =>
     `${label} ${active ? (dir === "asc" ? "▲" : "▼") : ""}`;
-
   const setRowSort = (k: keyof Row) => {
     setRowSortDir((d) => (rowSortKey === k ? (d === "asc" ? "desc" : "asc") : "asc"));
     setRowSortKey(k);
@@ -508,8 +531,9 @@ useEffect(() => {
     setSumSortKey(k);
   };
 
-  /* ---------- CSV exports ---------- */
+    /* ---------- CSV exports ---------- */
   function exportRowsCSV() {
+    // stesso header che avevi già in prod (non tocchiamo le colonne)
     const headerKeys: (keyof Row)[] = [
       "provider_name",
       "code_type",
@@ -536,12 +560,26 @@ useEffect(() => {
   }
 
   function exportSummaryCSV() {
-    const header = ["code", "description", "count", "min", "median", "p25", "p75", "max", "top1", "top2", "top3"];
+    const header = [
+      "code",
+      "description",
+      "count",
+      "min",
+      "median",
+      "p25",
+      "p75",
+      "max",
+      "top1",
+      "top2",
+      "top3",
+    ];
     const lines = filteredSortedSummary.map((s) => {
-      const tops = (s.top3 ?? []).map((t) => `${t.provider_name} ($${t.negotiated_rate.toFixed(2)})`);
+      const tops = (s.top3 ?? []).map(
+        (t) => `${t.provider_name} ($${Number(t.negotiated_rate ?? 0).toFixed(2)})`
+      );
       return [
         s.code,
-        `"${(s.description ?? "").replace(/"/g, '""')}"`,
+        `"${String(s.description ?? "").replace(/"/g, '""')}"`,
         s.count ?? 0,
         s.min ?? 0,
         s.median ?? 0,
@@ -562,6 +600,29 @@ useEffect(() => {
   }
 
   /* ---------- UI ---------- */
+  const SourceBadge = () => {
+    if (!source) return null;
+    let label = "";
+    if (source.kind === "demo") label = source.path.endsWith(".csv") ? "DEMO CSV" : "DEMO JSON";
+    if (source.kind === "upload") label = `Uploaded • ${source.name}`;
+    if (source.kind === "url") label = `URL • ${source.href}`;
+    return (
+      <div className="flex items-center gap-2 text-xs">
+        <span className="rounded-full bg-white/10 px-2 py-1">
+          Current source: <span className="font-medium">{label}</span>
+        </span>
+        <button
+          type="button"
+          className="underline opacity-80 hover:opacity-100"
+          onClick={clearResults}
+          aria-label="Clear current source and results"
+        >
+          Clear
+        </button>
+      </div>
+    );
+  };
+
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-black text-slate-100">
       {Header}
@@ -591,6 +652,7 @@ useEffect(() => {
                 ref={fileInputRef}
                 type="file"
                 accept=".csv,application/json,.json,text/csv"
+                multiple
                 onChange={onUploadInputChange}
                 className="hidden"
               />
@@ -598,7 +660,6 @@ useEffect(() => {
             </div>
           </div>
 
-          {/* Progress */}
           {(uploading || progress > 0) && (
             <div className="flex items-center gap-3">
               <progress max={100} value={progress} className="w-64 h-2" />
@@ -617,26 +678,51 @@ useEffect(() => {
                   ? "bg-blue-600 border-blue-500 text-white"
                   : "hover:bg-white/10"
               }`}
-              aria-pressed={isActiveDemo(source, "/data/sample_hospital_mrf.csv")}
             >
-              Analyze DEMO CSV
+              Demo A (CSV)
             </button>
 
             <button
               type="button"
-              onClick={() => analyzeURL("/data/sample_hospital_mrf.json")}
+              onClick={() => analyzeURL("/data/sample_hospital_mrf_plan_b.csv")}
               className={`px-3 py-2 rounded border transition ${
-                isActiveDemo(source, "/data/sample_hospital_mrf.json")
+                isActiveDemo(source, "/data/sample_hospital_mrf_plan_b.csv")
                   ? "bg-blue-600 border-blue-500 text-white"
                   : "hover:bg-white/10"
               }`}
-              aria-pressed={isActiveDemo(source, "/data/sample_hospital_mrf.json")}
             >
-              Analyze DEMO JSON
+              Demo B (CSV)
             </button>
 
-            {/* Badge con sorgente corrente */}
-            <div className="ml-2"><SourceBadge /></div>
+            <button
+              type="button"
+              onClick={() => analyzeURL("/data/sample_hospital_mrf_plan_c.json")}
+              className={`px-3 py-2 rounded border transition ${
+                isActiveDemo(source, "/data/sample_hospital_mrf_plan_c.json")
+                  ? "bg-blue-600 border-blue-500 text-white"
+                  : "hover:bg-white/10"
+              }`}
+            >
+              Demo C (JSON)
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                analyzeManyURLs([
+                  "/data/sample_hospital_mrf.csv",
+                  "/data/sample_hospital_mrf_plan_b.csv",
+                  "/data/sample_hospital_mrf_plan_c.json",
+                ])
+              }
+              className="px-3 py-2 rounded border hover:bg-white/10"
+            >
+              Compare A + B + C
+            </button>
+
+            <div className="ml-2">
+              <SourceBadge />
+            </div>
 
             <button
               type="button"
@@ -685,7 +771,7 @@ useEffect(() => {
           />
 
           {isOpen && suggestions.length > 0 && (
-            <div className="absolute z-20 mt-1 w-[calc(100%-3rem)] max-w-6xl max-h-72 overflow-auto border rounded-lg bg-black/90 backdrop-blur-sm">
+            <div className="absolute z-20 mt-1 w-[calc(100%-3rem)] max-w-6xl max-height-72 overflow-auto border rounded-lg bg-black/90 backdrop-blur-sm">
               {suggestions.map((s, idx) => (
                 <button
                   type="button"
@@ -727,27 +813,20 @@ useEffect(() => {
             </div>
           )}
 
-          <p className="text-xs opacity-60">
-            Tip: paste codes separated by comma/space — we’ll add them automatically later.
-          </p>
+          <p className="text-xs opacity-60">Tip: paste codes separated by comma/space — we’ll add them automatically later.</p>
 
           <div className="flex flex-wrap gap-2 pt-2">
             <button
-  type="button"
-  onClick={() => { 
-    clearResults(); 
-  }}
-  className="px-3 py-2 rounded border"
-  disabled={!allRows.length}
->
+              type="button"
+              onClick={() => {
+                clearResults();
+              }}
+              className="px-3 py-2 rounded border"
+              disabled={!allRows.length}
+            >
               Clear results
             </button>
-            <button
-              type="button"
-              onClick={exportRowsCSV}
-              disabled={!filteredSortedRows.length}
-              className="px-3 py-2 rounded border"
-            >
+            <button type="button" onClick={exportRowsCSV} disabled={!filteredSortedRows.length} className="px-3 py-2 rounded border">
               Export rows CSV
             </button>
             <button
@@ -777,12 +856,10 @@ useEffect(() => {
                   className="border rounded p-2 bg-transparent text-slate-100 placeholder-slate-400"
                 />
                 <button onClick={clearResults} className="px-3 py-2 rounded border">
-  Reset
-</button>
+                  Reset
+                </button>
               </div>
-              <div className="text-xs opacity-70">
-                Showing {filteredSortedSummary.length} of {summary.length}
-              </div>
+              <div className="text-xs opacity-70">Showing {filteredSortedSummary.length} of {summary.length}</div>
             </div>
 
             <div className="overflow-x-auto border rounded">
@@ -878,17 +955,11 @@ useEffect(() => {
                   inputMode="decimal"
                   className="border rounded p-2 bg-transparent text-slate-100 placeholder-slate-400"
                 />
-                <button
-  type="button"
-  onClick={clearResults}
-  className="px-3 py-2 rounded border"
->
-  Reset
-</button>
+                <button type="button" onClick={clearResults} className="px-3 py-2 rounded border">
+                  Reset
+                </button>
               </div>
-              <div className="text-xs opacity-70">
-                Showing {filteredSortedRows.length} of {rows.length}
-              </div>
+              <div className="text-xs opacity-70">Showing {filteredSortedRows.length} of {rows.length}</div>
             </div>
 
             <div className="overflow-x-auto border rounded">

@@ -1,5 +1,5 @@
 [
-  {"provider_name":"General Hospital","code_type":"CPT","code":"70551","description":"MRI brain without contrast","rate_type":"in_network_negotiated","negotiated_rate":800.00,"geo":"NY-NYC","last_updated":"2025-08-01"},
+  {"provider_name":"General Hospital","code_type":"CPT","code":"70551","description":"MRI brain without contrast","rate_type":"in_network_negotiated","negotiated_rate":800,"geo":"NY-NYC","last_updated":"2025-08-01"},
   {"provider_name":"General Hospital","code_type":"CPT","code":"74177","description":"CT abdomen/pelvis with contrast","rate_type":"in_network_negotiated","negotiated_rate":1199.5,"geo":"NY-NYC","last_updated":"2025-08-01"},
   {"provider_name":"General Hospital","code_type":"CPT","code":"45378","description":"Colonoscopy diagnostic","rate_type":"in_network_negotiated","negotiated_rate":658,"geo":"NY-NYC","last_updated":"2025-08-01"},
   {"provider_name":"General Hospital","code_type":"CPT","code":"66984","description":"Cataract surgery","rate_type":"in_network_negotiated","negotiated_rate":2900,"geo":"NY-NYC","last_updated":"2025-08-01"},
