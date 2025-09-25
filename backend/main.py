@@ -12,7 +12,11 @@ app = FastAPI(title="Costvista API")
 # Niente credenziali: non usiamo cookie.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "https://costvista.com",
+        "https://www.costvista.com",
+    ],
     allow_origin_regex=r"^https:\/\/.*\.vercel\.app$",
     allow_credentials=False,
     allow_methods=["*"],
