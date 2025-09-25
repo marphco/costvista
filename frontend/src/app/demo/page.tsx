@@ -186,13 +186,13 @@ const isActiveDemo = (p: Source | null, path: DemoPath) =>
           Current source: <span className="font-medium">{label}</span>
         </span>
         <button
-          type="button"
-          className="underline opacity-80 hover:opacity-100"
-          onClick={() => setSource(null)}
-          aria-label="Clear current source"
-        >
-          Clear
-        </button>
+  type="button"
+  className="underline opacity-80 hover:opacity-100"
+  onClick={clearResults}
+  aria-label="Clear current source and results"
+>
+  Clear
+</button>
       </div>
     );
   };
@@ -362,30 +362,46 @@ form.append("file", file);
     setSumSortDir("asc");
   }
 
-  function clearResults() {
-  setRows(allRows);
-  setSummary(summarizeClient(allRows));
-  setRowCodeQ("");
-  setRowProviderQ("");
-  setRowMinRate("");
-  setRowMaxRate("");
-  setSumCodeQ("");
-  setCodeChips([]);
-  setProcQuery("");
-  setDebouncedQ("");
+  const skipNextAuto = useRef(false);
+
+function clearResults() {
+  // reset anche della sorgente selezionata
+  setSource(null);
+
+  // svuota dataset e risultati
+  setAllRows([]);
+  setAllSummary([]);
+  setRows([]);
+  setSummary([]);
+
+  // reset UI state
+  setRowCodeQ(""); setRowProviderQ(""); setRowMinRate(""); setRowMaxRate("");
+  setRowSortKey("negotiated_rate"); setRowSortDir("asc");
+  setSumCodeQ(""); setSumSortKey("median"); setSumSortDir("asc");
+  setCodeChips([]); setProcQuery(""); setDebouncedQ("");
 }
 
 
-  // Auto-refresh locale dopo un'analisi: filtra e ricalcola summary senza ricliccare
 useEffect(() => {
   if (!allRows.length) return;
+
+  if (skipNextAuto.current) {
+    skipNextAuto.current = false;
+    return;
+  }
+
   const codes = getCodesToSend(codeChips, debouncedQ);
   const target = codes.length
     ? allRows.filter(r => codes.includes(String(r.code ?? "")))
     : allRows;
-  setRows(target);
-  setSummary(summarizeClient(target));
-}, [allRows, codeChips, debouncedQ]);
+
+  setRows(codes.length ? target : [...allRows]);
+  setSummary(
+    codes.length
+      ? summarizeClient(target)
+      : (allSummary.length ? [...allSummary] : summarizeClient(allRows))
+  );
+}, [allRows, allSummary, codeChips, debouncedQ]);
 
 
   /* ---------- Analyze by URL / demo ---------- */
@@ -704,11 +720,13 @@ useEffect(() => {
 
           <div className="flex flex-wrap gap-2 pt-2">
             <button
-              type="button"
-              onClick={clearResults}
-              className="px-3 py-2 rounded border"
-              disabled={!allRows.length}
-            >
+  type="button"
+  onClick={() => { 
+    clearResults(); 
+  }}
+  className="px-3 py-2 rounded border"
+  disabled={!allRows.length}
+>
               Clear results
             </button>
             <button
