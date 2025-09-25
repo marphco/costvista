@@ -1,19 +1,20 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form # type: ignore
-from fastapi.middleware.cors import CORSMiddleware # type: ignore
-from pydantic import BaseModel # type: ignore
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form  # type: ignore
+from fastapi.middleware.cors import CORSMiddleware  # type: ignore
+from pydantic import BaseModel  # type: ignore
 from typing import List, Dict, Any, Optional
 from pathlib import Path
-import os, csv, io, json, httpx, asyncio # type: ignore
+import csv, io, json, httpx, re  # type: ignore
 
 app = FastAPI(title="Costvista API")
 
 # ---------------- CORS ----------------
-# Consente localhost in dev e *.vercel.app in prod/preview.
+# Consenti esplicitamente il front in dev e *.vercel.app in preview/prod.
+# Niente credenziali: non usiamo cookie.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[],  # usiamo la regex sotto
-    allow_origin_regex=r"^(https?:\/\/localhost(:\d+)?|https:\/\/.*\.vercel\.app)$",
-    allow_credentials=True,
+    allow_origins=["http://localhost:3000"],
+    allow_origin_regex=r"^https:\/\/.*\.vercel\.app$",
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -38,93 +39,165 @@ async def read_text(url_or_path: str) -> str:
         raise HTTPException(404, f"Local file not found: {fp}")
     return fp.read_text(encoding="utf-8")
 
+
+_number_re = re.compile(r"[^\d\.\-]")  # tieni solo 0-9 . -
+
 def _coerce_float(val) -> float:
     try:
-        if isinstance(val, str):
-            v = val.replace("$", "").replace(",", "").strip()
-            if v == "" or v.lower() == "nan":
-                return 0.0
-            return float(v)
-        return float(val or 0)
+        if val is None:
+            return 0.0
+        s = str(val).strip()
+        if not s or s.lower() == "nan":
+            return 0.0
+        s = _number_re.sub("", s)
+        if s in ("", ".", "-"):
+            return 0.0
+        return float(s)
     except Exception:
         return 0.0
 
-def _pick_key(d: Dict[str, Any], candidates) -> Optional[str]:
-    low = {k.lower(): k for k in d.keys()}
-    for c in candidates:
-        k = low.get(c.lower())
-        if k:
-            return k
-    return None
+# ========= Header normalization (ibrida: regole + hook AI) =========
 
+# Vocabolario di sinonimi: header sorgente -> campo canonico
+CANON_FIELDS = {
+    "code": [
+        "code","cpt","hcpcs","drg","billing_code","cpt_code","hcpcs_code",
+        "cpt/hcpcs","cpt / hcpcs","procedure code","billing code",
+    ],
+    "description": [
+        "description","procedure","service","name","procedure description",
+    ],
+    "provider_name": [
+        "provider_name","reporting_entity_name","payer","third-party","reporting entity name",
+    ],
+    "rate_type": [
+        "rate_type","billing_class","network","billing class",
+    ],
+    "negotiated_rate": [
+        "negotiated_rate","allowed_amount","allowed","price","rate","amount",
+        "allowed amount","allowed amount ($)","plan allowed amount","plan allowed",
+        "allowed_amt","allowedamount","negotiated amount","negotiated_price",
+        "negotiated charge","plan rate","rate ($)","price ($)",
+    ],
+}
+
+def _norm(s: Any) -> str:
+    return str(s or "").strip().lower()
+
+def _build_mapping(headers: List[str]) -> Dict[str, str]:
+    """
+    Ritorna un mapping {header_sorgente -> canonico} usando:
+    1) match esatto case-insensitive
+    2) match "contains" se >=3 colonne
+    3) hook AI opzionale per i residui (se abilitato)
+    """
+    mapping: Dict[str, str] = {}
+
+    # 1) exact match
+    for canon, syns in CANON_FIELDS.items():
+        syn_norm = set(_norm(x) for x in syns)
+        for h in headers:
+            if h is None:
+                continue
+            if _norm(h) in syn_norm:
+                mapping[h] = canon
+
+    # 2) contains (solo se ha senso)
+    if len([h for h in headers if h is not None]) >= 3:
+        for canon, syns in CANON_FIELDS.items():
+            for h in headers:
+                if h is None or h in mapping:
+                    continue
+                hn = _norm(h)
+                if any(_norm(s) in hn for s in syns):
+                    mapping[h] = canon
+
+    # 3) hook AI per i residui (opzionale)
+    residui = [h for h in headers if h is not None and h not in mapping]
+    if residui:
+        ai_map = _ai_suggest_mapping(residui)
+        for h, cand in ai_map.items():
+            if cand in CANON_FIELDS and h not in mapping:
+                mapping[h] = cand
+
+    return mapping
+
+def _apply_mapping_to_row(row: Dict[str, Any], mapping: Dict[str, str]) -> Dict[str, Any]:
+    """Applica il mapping alla riga producendo chiavi canoniche; preserva tutto il resto."""
+    out = dict(row)
+    for src_key, canon in mapping.items():
+        if src_key in row and canon not in out:
+            out[canon] = row.get(src_key)
+    return out
+
+def normalize_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Normalizza tutte le righe allo schema: code, description, provider_name, rate_type, negotiated_rate (+ resto)."""
+    if not rows:
+        return rows
+    headers = list(rows[0].keys())
+    mapping = _build_mapping(headers)
+    normed = [_apply_mapping_to_row(r, mapping) for r in rows]
+    for r in normed:
+        r["negotiated_rate"] = _coerce_float(r.get("negotiated_rate"))
+        for k in ("code", "description", "provider_name", "rate_type"):
+            if k in r:
+                r[k] = str(r.get(k) or "").strip()
+    return normed
+
+# Hook AI opzionale (disattivo di default)
+USE_LLM_SCHEMA = False
+def _ai_suggest_mapping(headers_unknown: List[str]) -> Dict[str, str]:
+    if not USE_LLM_SCHEMA:
+        return {}
+    # Qui potrai chiamare il tuo LLM e restituire, ad es.: {"Allowed Amount ($)": "negotiated_rate"}
+    return {}
+
+# ---------------- CSV parsing ----------------
 def parse_csv(text: str) -> List[Dict[str, Any]]:
-    reader = csv.DictReader(io.StringIO(text))
+    """CSV robust parser con sniff + fallback e normalizzazione header a batch."""
+    # rimuovi BOM
+    raw = text.lstrip("\ufeff")
+    src = io.StringIO(raw)
+
+    # prova a sniffare il dialetto; fallback su delimitatori comuni
+    sample = raw[:4096]
+    reader: csv.DictReader
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=[",", ";", "\t", "|"])
+        reader = csv.DictReader(src, dialect=dialect, restkey="_extra", restval="")
+    except Exception:
+        reader = None  # type: ignore
+        for delim in [";", "\t", "|", ","]:
+            src.seek(0)
+            tmp = csv.DictReader(src, delimiter=delim, restkey="_extra", restval="")
+            if tmp.fieldnames and len([h for h in tmp.fieldnames if h is not None]) > 1:
+                reader = tmp  # type: ignore
+                break
+        if reader is None:  # estremo fallback
+            src.seek(0)
+            reader = csv.DictReader(src, restkey="_extra", restval="")
+
+    # ---- costruisci il mapping UNA VOLTA usando i fieldnames ----
+    fieldnames = [h for h in (getattr(reader, "fieldnames", None) or [])]
+    mapping = _build_mapping(fieldnames)
+
     rows: List[Dict[str, Any]] = []
     for row in reader:
-        # negotiated_rate
-        rate_key = _pick_key(row, [
-            "negotiated_rate", "allowed_amount", "allowed",
-            "price", "rate", "amount", "ALLOWED_AMOUNT", "ALLOWED"
-        ])
-        row["negotiated_rate"] = _coerce_float(row.get(rate_key)) if rate_key else 0.0
+        row.pop(None, None)  # safety
+        # applica mapping a livello di riga
+        row = _apply_mapping_to_row(row, mapping)
 
-        # code
-        code_key = _pick_key(row, ["code", "cpt", "drg", "billing_code", "hcpcs", "cpt_code", "BILLING_CODE", "HCPCS"])
-        if code_key:
-            row["code"] = str(row.get(code_key))
-
-        # description
-        desc_key = _pick_key(row, ["description", "name", "procedure", "DESCRIPTION", "NAME", "PROCEDURE"])
-        if desc_key:
-            row["description"] = str(row.get(desc_key))
-
-        # provider name
-        prov_key = _pick_key(row, ["provider_name", "reporting_entity_name", "PROVIDER_NAME", "REPORTING_ENTITY_NAME"])
-        if prov_key:
-            row["provider_name"] = str(row.get(prov_key))
-
-        # rate type
-        type_key = _pick_key(row, ["rate_type", "billing_class", "RATE_TYPE", "BILLING_CLASS"])
-        if type_key:
-            row["rate_type"] = str(row.get(type_key))
+        # coerzioni "soft" (non rompono se mancanti)
+        row["negotiated_rate"] = _coerce_float(row.get("negotiated_rate"))
+        for k in ("code", "description", "provider_name", "rate_type"):
+            if k in row:
+                row[k] = str(row.get(k) or "").strip()
 
         rows.append(row)
+
     return rows
 
-def _coerce_negotiated_rate(rows: List[Dict[str, Any]]) -> None:
-    for r in rows:
-        if isinstance(r, dict):
-            r["negotiated_rate"] = _coerce_float(r.get("negotiated_rate"))
-
-def _find_first_array_of_objects(obj: Any) -> Optional[List[Dict[str, Any]]]:
-    """
-    Accetta:
-      - array puro [ {...}, ... ]
-      - { data: [ {...} ] }
-      - qualunque oggetto che contenga come PRIMO valore una lista di oggetti
-      - NDJSON (una riga = un oggetto JSON)
-    """
-    if isinstance(obj, list) and (len(obj) == 0 or isinstance(obj[0], dict)):
-        return obj
-
-    if isinstance(obj, dict):
-        if isinstance(obj.get("data"), list) and (len(obj["data"]) == 0 or isinstance(obj["data"][0], dict)):
-            return obj["data"]
-        for _, v in obj.items():
-            if isinstance(v, list) and (len(v) == 0 or isinstance(v[0], dict)):
-                return v
-
-    if isinstance(obj, str):
-        lines = [ln.strip() for ln in obj.splitlines() if ln.strip()]
-        try:
-            rows = [json.loads(ln) for ln in lines]
-            if rows and isinstance(rows[0], dict):
-                return rows
-        except Exception:
-            pass
-
-    return None
-
+# --------------- Stat helpers ---------------
 def _median(nums: List[float]) -> float:
     if not nums: return 0.0
     s = sorted(nums); n = len(s); m = n // 2
@@ -194,11 +267,13 @@ async def parse(req: ParseReq):
     else:
         raise HTTPException(400, "Unsupported file type. Use .csv or .json")
 
+    # Normalizzazione comune
+    rows = normalize_rows(rows)
+
     if req.codes and rows and isinstance(rows[0], dict):
         code_set = set(map(str, req.codes))
         rows = [r for r in rows if str(r.get("code")) in code_set]
 
-    _coerce_negotiated_rate(rows)
     return {"count": len(rows), "rows": rows}
 
 @app.post("/api/summary")
@@ -220,11 +295,12 @@ async def summary(req: SummaryReq):
     else:
         raise HTTPException(400, "Unsupported file type. Use .csv or .json")
 
+    rows = normalize_rows(rows)
+
     if req.codes and rows and isinstance(rows[0], dict):
         code_set = set(map(str, req.codes))
         rows = [r for r in rows if str(r.get("code")) in code_set]
 
-    _coerce_negotiated_rate(rows)
     res = _summarize(rows)
     if not req.include_rows:
         res.pop("rows", None)
@@ -232,6 +308,25 @@ async def summary(req: SummaryReq):
 
 # -------- Upload (50MB) --------
 MAX_SIZE_BYTES = 50 * 1024 * 1024
+
+def _find_first_array_of_objects(obj: Any) -> Optional[List[Dict[str, Any]]]:
+    if isinstance(obj, list) and (len(obj) == 0 or isinstance(obj[0], dict)):
+        return obj
+    if isinstance(obj, dict):
+        if isinstance(obj.get("data"), list) and (len(obj["data"]) == 0 or isinstance(obj["data"][0], dict)):
+            return obj["data"]
+        for _, v in obj.items():
+            if isinstance(v, list) and (len(v) == 0 or isinstance(v[0], dict)):
+                return v
+    if isinstance(obj, str):
+        lines = [ln.strip() for ln in obj.splitlines() if ln.strip()]
+        try:
+            rows = [json.loads(ln) for ln in lines]
+            if rows and isinstance(rows[0], dict):
+                return rows
+        except Exception:
+            pass
+    return None
 
 @app.post("/api/summary_upload")
 async def summary_upload(
@@ -243,32 +338,35 @@ async def summary_upload(
     chunks: List[bytes] = []
     while True:
         chunk = await file.read(1024 * 1024)  # 1MB
-        if not chunk: break
+        if not chunk:
+            break
         total += len(chunk)
         if total > MAX_SIZE_BYTES:
             raise HTTPException(413, "File too large (limit 50MB).")
         chunks.append(chunk)
+
     data = b"".join(chunks)
     text = data.decode("utf-8", errors="replace")
-    name = (file.filename or "").lower()
 
-    # parse
-    if file.content_type == "text/csv" or name.endswith(".csv"):
-        rows = parse_csv(text)
+    # 1) prova JSON puro
+    rows: List[Dict[str, Any]] = []
+    try:
+        obj = json.loads(text)
+    except json.JSONDecodeError:
+        # 2) NDJSON
+        rows = _find_first_array_of_objects(text) or []
+        if not rows:
+            # 3) CSV (auto-detect)
+            rows = parse_csv(text)
     else:
-        try:
-            obj = json.loads(text)
-        except json.JSONDecodeError:
-            rows = _find_first_array_of_objects(text) or []
-            if not rows:
-                raise HTTPException(400, "Invalid JSON.")
-        else:
-            rows = _find_first_array_of_objects(obj) or []
-            if not rows:
-                raise HTTPException(
-                    400,
-                    "Expected an array, { data: [...] }, any object with a first array of objects, or NDJSON."
-                )
+        rows = _find_first_array_of_objects(obj) or []
+        if not rows:
+            raise HTTPException(
+                400,
+                "Expected an array, { data: [...] }, any object with a first array of objects, or NDJSON."
+            )
+
+    rows = normalize_rows(rows)
 
     if codes and rows and isinstance(rows[0], dict):
         code_set = set(map(str, codes))
@@ -279,7 +377,6 @@ async def summary_upload(
             return False
         rows = [r for r in rows if _match(r)]
 
-    _coerce_negotiated_rate(rows)
     res = _summarize(rows)
     if not include_rows:
         res.pop("rows", None)

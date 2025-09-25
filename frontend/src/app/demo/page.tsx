@@ -232,22 +232,36 @@ form.append("file", file);
       setUploading(false);
     };
     xhr.onload = () => {
-      try {
-        const data = JSON.parse(xhr.responseText);
-        if (xhr.status >= 200 && xhr.status < 300) {
-          resetTables(data);
-          setSource({ kind: "upload", name: file.name, size: file.size, type: file.type });
-          setProgress(100);
-        } else {
-          setUploadErr(data?.detail || "Upload error.");
-        }
-      } catch {
-        setUploadErr("Invalid server response.");
-      } finally {
-        setUploading(false);
-        setTimeout(() => setProgress(0), 600);
-      }
-    };
+  try {
+    // Alcuni errori del backend arrivano come text/plain o HTML:
+    // proviamo JSON, altrimenti usiamo raw text.
+    let data: any = null;
+    try {
+      data = JSON.parse(xhr.responseText);
+    } catch {
+      data = { detail: xhr.responseText || "Server returned a non-JSON response." };
+    }
+
+    if (xhr.status >= 200 && xhr.status < 300) {
+      // payload atteso: { rows?: Row[], summary?: Summary[] }
+      resetTables(data);
+      setSource({ kind: "upload", name: file.name, size: file.size, type: file.type });
+      setProgress(100);
+    } else {
+      // surface dell’errore leggibile a UI
+      setUploadErr(
+        typeof data?.detail === "string" && data.detail.trim()
+          ? data.detail
+          : `Upload error (HTTP ${xhr.status}).`
+      );
+    }
+  } catch (e) {
+    setUploadErr("Unexpected error while reading the server response.");
+  } finally {
+    setUploading(false);
+    setTimeout(() => setProgress(0), 600);
+  }
+};
     xhr.send(form);
   }
 
