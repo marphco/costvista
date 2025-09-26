@@ -3,7 +3,17 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type ChangeEvent,
+  type KeyboardEvent,
+  type DragEvent,
+} from "react";
+import { MotionConfig, motion } from "framer-motion";
 
 /* ============================
    Demo paths (unica fonte)
@@ -161,21 +171,70 @@ const summarizeClient = (rows: Row[]): Summary[] => {
 };
 
 /* ============================
+   UI helpers (solo stile)
+============================ */
+const fadeUp = { initial: { opacity: 0, y: 12 }, animate: { opacity: 1, y: 0 } };
+
+function Chip({ children }: { children: ReactNode }) {
+  return (
+    <span className="inline-flex items-center rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-200">
+      {children}
+    </span>
+  );
+}
+
+function Btn({
+  children,
+  kind = "ghost",
+  className = "",
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { kind?: "primary" | "ghost" | "outline" }) {
+  const base = "px-3 py-2 rounded transition text-sm";
+  const cls =
+    kind === "primary"
+      ? "bg-sky-500 text-black hover:bg-sky-400"
+      : kind === "outline"
+      ? "border border-white/20 hover:bg-white/10"
+      : "border hover:bg-white/10";
+  return (
+    <button {...props} className={`${base} ${cls} ${className}`}>
+      {children}
+    </button>
+  );
+}
+
+function CardShell({ title, children }: { title?: string; children: ReactNode }) {
+  return (
+    <div className="relative rounded-2xl border border-white/10 bg-white/5 shadow-2xl overflow-hidden">
+      {title ? (
+        <div className="px-4 py-2 text-xs text-slate-300 border-b border-white/10">{title}</div>
+      ) : null}
+      <div className="p-4 md:p-6 relative">{children}</div>
+      <div className="pointer-events-none absolute -bottom-24 left-1/2 h-48 w-[42rem] -translate-x-1/2 rounded-full bg-sky-500/10 blur-3xl" />
+    </div>
+  );
+}
+
+function SectionTitle({ children }: { children: ReactNode }) {
+  return <h2 className="text-base md:text-lg font-semibold">{children}</h2>;
+}
+
+/* ============================
    Page Component
 ============================ */
 export default function DemoPage() {
   /* ---------- Header ---------- */
   const Header = (
-    <header className="sticky top-0 z-40 border-b border-white/10 backdrop-blur supports-[backdrop-filter]:bg-white/5">
+    <header className="sticky top-0 z-50 border-b border-white/10 backdrop-blur supports-[backdrop-filter]:bg-white/5">
       <div className="mx-auto max-w-6xl px-3 md:px-4 py-3 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-3">
           <Image
             src="/assets/costvista.svg"
             alt="Costvista"
-            width={260}
-            height={72}
-            className="h-12 md:h-14 w-auto drop-shadow-[0_1px_0_rgba(255,255,255,0.35)] [filter:brightness(1.15)]"
+            width={240}
+            height={64}
             priority
+            className="h-12 md:h-14 w-auto drop-shadow-[0_1px_0_rgba(255,255,255,0.35)] [filter:brightness(1.15)]"
           />
           <span className="sr-only">Costvista</span>
         </Link>
@@ -250,7 +309,7 @@ export default function DemoPage() {
       } catch {
         setUploadErr("Unexpected error while reading the server response.");
       } finally {
-        setUploading(false);
+               setUploading(false);
         setTimeout(() => setProgress(0), 600);
       }
     };
@@ -274,7 +333,7 @@ export default function DemoPage() {
     return { rows, summary };
   }
 
-  async function onUploadInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function onUploadInputChange(e: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
 
@@ -299,12 +358,12 @@ export default function DemoPage() {
   }
 
   // Drag & drop (usa upload singolo; il file input gestisce il multi)
-  function onDrop(e: React.DragEvent) {
+  function onDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
     const f = e.dataTransfer.files?.[0];
     if (f) handleFileUpload(f);
   }
-  function onDragOver(e: React.DragEvent) {
+  function onDragOver(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
   }
 
@@ -342,7 +401,7 @@ export default function DemoPage() {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
 
-  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (!isOpen || suggestions.length === 0) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -491,10 +550,10 @@ export default function DemoPage() {
         throw new Error(String(msg));
       }
 
-      const payload = (isApiSummaryShape(raw) ? raw : hasDetail(raw) && isApiSummaryShape(raw.detail) ? raw.detail : {
+      const payload = (isApiSummaryShape(raw) ? raw : (hasDetail(raw) && isApiSummaryShape((raw as any).detail) ? (raw as any).detail : {
         rows: [],
         summary: [],
-      }) as ApiSummaryResponse;
+      })) as ApiSummaryResponse;
 
       resetTables(payload);
       setIndexSuggestions([]);
@@ -655,7 +714,7 @@ export default function DemoPage() {
   const SourceBadge = () => {
     if (!source) return null;
     let label = "";
-    if (source.kind === "demo") label = (source.path.endsWith(".csv") ? "DEMO CSV" : "DEMO JSON");
+    if (source.kind === "demo") label = source.path.endsWith(".csv") ? "DEMO CSV" : "DEMO JSON";
     if (source.kind === "upload") label = `Uploaded • ${source.name}`;
     if (source.kind === "url") label = `URL • ${source.href}`;
     return (
@@ -676,399 +735,409 @@ export default function DemoPage() {
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-black text-slate-100">
-      {Header}
+    <MotionConfig reducedMotion="user">
+      <main className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-black text-slate-100">
+        {Header}
 
-      <div className="max-w-6xl mx-auto p-6 space-y-6">
-        {/* Upload / Demo */}
-        <section className="space-y-3">
-          <h2 className="text-base font-semibold">Upload or pick a demo</h2>
+        <div className="max-w-6xl mx-auto p-6 space-y-6">
+          {/* Upload / Demo */}
+          <section className="space-y-3">
+            <motion.div variants={fadeUp} initial="initial" animate="animate" transition={{ duration: 0.4 }}>
+              <SectionTitle>Upload or pick a demo</SectionTitle>
+            </motion.div>
 
-          {/* Dropzone */}
-          <div
-            onDrop={onDrop}
-            onDragOver={onDragOver}
-            className="rounded-xl border border-dashed border-white/20 p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
-          >
-            <div className="text-sm opacity-80">Drag & drop a CSV or JSON (max 50MB), or</div>
-
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="px-4 py-2 rounded bg-blue-600 text-white"
+            <CardShell>
+              {/* Dropzone */}
+              <div
+                onDrop={onDrop}
+                onDragOver={onDragOver}
+                className="rounded-xl border border-dashed border-white/20 p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-black/30"
               >
-                Choose file
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".csv,application/json,.json,text/csv"
-                multiple
-                onChange={onUploadInputChange}
-                className="hidden"
-              />
-              <div className="text-xs opacity-60">CSV / JSON only</div>
-            </div>
-          </div>
+                <div className="text-sm text-slate-300">Drag & drop a CSV or JSON (max 50MB), or</div>
 
-          {(uploading || progress > 0) && (
-            <div className="flex items-center gap-3">
-              <progress max={100} value={progress} className="w-64 h-2" />
-              <span className="text-xs opacity-70">{progress}%</span>
-            </div>
-          )}
-          {uploadErr && <div className="text-sm text-red-500">{uploadErr}</div>}
+                <div className="flex items-center gap-3">
+                  <Btn kind="primary" type="button" onClick={() => fileInputRef.current?.click()}>
+                    Choose file
+                  </Btn>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv,application/json,.json,text/csv"
+                    multiple
+                    onChange={onUploadInputChange}
+                    className="hidden"
+                  />
+                  <div className="text-xs opacity-60">CSV / JSON only</div>
+                </div>
+              </div>
 
-          {/* Demo buttons + URL toggle */}
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => analyzeURL("/data/sample_hospital_mrf.csv")}
-              className={`px-3 py-2 rounded border transition ${
-                isActiveDemo(source, "/data/sample_hospital_mrf.csv") ? "bg-blue-600 border-blue-500 text-white" : "hover:bg/white/10"
-              }`}
-            >
-              Demo A (CSV)
-            </button>
-
-            <button
-              type="button"
-              onClick={() => analyzeURL("/data/sample_hospital_mrf_plan_b.csv")}
-              className={`px-3 py-2 rounded border transition ${
-                isActiveDemo(source, "/data/sample_hospital_mrf_plan_b.csv") ? "bg-blue-600 border-blue-500 text-white" : "hover:bg-white/10"
-              }`}
-            >
-              Demo B (CSV)
-            </button>
-
-            <button
-              type="button"
-              onClick={() => analyzeURL("/data/sample_hospital_mrf_plan_c.json")}
-              className={`px-3 py-2 rounded border transition ${
-                isActiveDemo(source, "/data/sample_hospital_mrf_plan_c.json") ? "bg-blue-600 border-blue-500 text-white" : "hover:bg-white/10"
-              }`}
-            >
-              Demo C (JSON)
-            </button>
-
-            <button
-              type="button"
-              onClick={() =>
-                analyzeManyURLs(["/data/sample_hospital_mrf.csv", "/data/sample_hospital_mrf_plan_b.csv", "/data/sample_hospital_mrf_plan_c.json"])
-              }
-              className="px-3 py-2 rounded border hover:bg-white/10"
-            >
-              Compare A + B + C
-            </button>
-
-            <div className="ml-2">
-              <SourceBadge />
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setShowUrlBox((v) => !v)}
-              className="ml-auto px-3 py-2 rounded border hover:bg-white/10"
-            >
-              {showUrlBox ? "Hide URL (advanced)" : "Show URL (advanced)"}
-            </button>
-          </div>
-
-          {showUrlBox && (
-            <div className="flex gap-2">
-              <input
-                className="w-full border rounded p-2 bg-transparent text-slate-100 placeholder-slate-400"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="CSV/JSON URL or local path (e.g., /data/sample_hospital_mrf.csv)"
-              />
-
-              {indexSuggestions.length > 0 && (
-                <div className="mt-3 space-y-2 rounded-lg border border-yellow-500/40 bg-yellow-500/10 p-3">
-                  <div className="text-sm font-medium">This looks like a CMS index. Pick an in-network file:</div>
-                  <div className="flex flex-wrap gap-2">
-                    {indexSuggestions.map((u, i) => (
-                      <button
-                        key={u + i}
-                        type="button"
-                        onClick={() => analyzeURL(u)}
-                        className="text-xs px-3 py-2 rounded border hover:bg-white/10 truncate max-w-full"
-                        title={u}
-                      >
-                        {u}
-                      </button>
-                    ))}
+              {(uploading || progress > 0) && (
+                <div className="flex items-center gap-3 mt-3">
+                  <div className="relative w-64 h-2 rounded bg-white/10 overflow-hidden">
+                    <div
+                      className="absolute inset-y-0 left-0 bg-sky-500"
+                      style={{ width: `${progress}%` }}
+                    />
                   </div>
-                  <div className="pt-1">
-                    <button
-                      type="button"
-                      onClick={() => setIndexSuggestions([])}
-                      className="text-xs underline opacity-80 hover:opacity-100"
-                    >
-                      Dismiss suggestions
-                    </button>
+                  <span className="text-xs opacity-70">{progress}%</span>
+                </div>
+              )}
+              {uploadErr && <div className="text-sm text-rose-400 mt-2">{uploadErr}</div>}
+
+              {/* Demo buttons + URL toggle */}
+              <div className="flex flex-wrap items-center gap-2 mt-4">
+                <Btn
+                  type="button"
+                  kind={isActiveDemo(source, "/data/sample_hospital_mrf.csv") ? "primary" : "outline"}
+                  onClick={() => analyzeURL("/data/sample_hospital_mrf.csv")}
+                >
+                  Demo A (CSV)
+                </Btn>
+
+                <Btn
+                  type="button"
+                  kind={isActiveDemo(source, "/data/sample_hospital_mrf_plan_b.csv") ? "primary" : "outline"}
+                  onClick={() => analyzeURL("/data/sample_hospital_mrf_plan_b.csv")}
+                >
+                  Demo B (CSV)
+                </Btn>
+
+                <Btn
+                  type="button"
+                  kind={isActiveDemo(source, "/data/sample_hospital_mrf_plan_c.json") ? "primary" : "outline"}
+                  onClick={() => analyzeURL("/data/sample_hospital_mrf_plan_c.json")}
+                >
+                  Demo C (JSON)
+                </Btn>
+
+                <Btn
+                  type="button"
+                  kind="outline"
+                  onClick={() =>
+                    analyzeManyURLs([
+                      "/data/sample_hospital_mrf.csv",
+                      "/data/sample_hospital_mrf_plan_b.csv",
+                      "/data/sample_hospital_mrf_plan_c.json",
+                    ])
+                  }
+                >
+                  Compare A + B + C
+                </Btn>
+
+                <div className="ml-2">
+                  <SourceBadge />
+                </div>
+
+                <Btn type="button" className="ml-auto" kind="outline" onClick={() => setShowUrlBox((v) => !v)}>
+                  {showUrlBox ? "Hide URL (advanced)" : "Show URL (advanced)"}
+                </Btn>
+              </div>
+
+              {showUrlBox && (
+                <div className="flex flex-col gap-2 mt-3">
+                  <input
+                    className="w-full border rounded p-2 bg-white/5 border-white/10 text-slate-100 placeholder-slate-400"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    placeholder="CSV/JSON URL or local path (e.g., /data/sample_hospital_mrf.csv)"
+                  />
+
+                  {indexSuggestions.length > 0 && (
+                    <div className="space-y-2 rounded-lg border border-yellow-500/40 bg-yellow-500/10 p-3">
+                      <div className="text-sm font-medium">This looks like a CMS index. Pick an in-network file:</div>
+                      <div className="flex flex-wrap gap-2">
+                        {indexSuggestions.map((u, i) => (
+                          <Btn
+                            key={u + i}
+                            type="button"
+                            kind="outline"
+                            onClick={() => analyzeURL(u)}
+                            className="text-xs truncate max-w-full"
+                            title={u}
+                          >
+                            {u}
+                          </Btn>
+                        ))}
+                      </div>
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setIndexSuggestions([])}
+                          className="text-xs underline opacity-80 hover:opacity-100"
+                        >
+                          Dismiss suggestions
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <Btn type="button" kind="primary" onClick={() => url && analyzeURL(url)}>
+                      Analyze
+                    </Btn>
                   </div>
                 </div>
               )}
+            </CardShell>
+          </section>
 
-              <button type="button" onClick={() => url && analyzeURL(url)} className="px-3 py-2 rounded bg-blue-600 text-white">
-                Analyze
-              </button>
-            </div>
-          )}
-        </section>
+          {/* Codes typeahead & actions */}
+          <section ref={boxRef} className="space-y-1">
+            <label className="block text-sm opacity-80">Pick procedures</label>
+            <input
+              ref={inputRef}
+              value={procQuery}
+              onChange={(e) => {
+                setProcQuery(e.target.value);
+                setIsOpen(true);
+                setHighlightIdx(0);
+              }}
+              onFocus={() => setIsOpen(!!procQuery)}
+              onKeyDown={onKeyDown}
+              placeholder="Search by code or description (e.g., MRI, 70551)…"
+              className="w-full border rounded p-2 bg-white/5 border-white/10 text-slate-100 placeholder-slate-400"
+              autoComplete="off"
+            />
 
-        {/* Codes typeahead & actions */}
-        <section ref={boxRef} className="space-y-1">
-          <label className="block text-sm opacity-80">Pick procedures</label>
-          <input
-            ref={inputRef}
-            value={procQuery}
-            onChange={(e) => {
-              setProcQuery(e.target.value);
-              setIsOpen(true);
-              setHighlightIdx(0);
-            }}
-            onFocus={() => setIsOpen(!!procQuery)}
-            onKeyDown={onKeyDown}
-            placeholder="Search by code or description (e.g., MRI, 70551)…"
-            className="w-full border rounded p-2 bg-transparent text-slate-100 placeholder-slate-400"
-            autoComplete="off"
-          />
-
-          {isOpen && suggestions.length > 0 && (
-            <div className="absolute z-20 mt-1 w-[calc(100%-3rem)] max-w-6xl max-h-72 overflow-auto border rounded-lg bg-black/90 backdrop-blur-sm">
-              {suggestions.map((s, idx) => (
-                <button
-                  type="button"
-                  key={s.code + idx}
-                  onMouseEnter={() => setHighlightIdx(idx)}
-                  onClick={() => {
-                    addCode(s);
-                    setProcQuery("");
-                    setIsOpen(false);
-                    inputRef.current?.focus();
-                  }}
-                  className={`w-full text-left px-3 py-2 text-sm ${idx === highlightIdx ? "bg-white/10" : ""}`}
-                  title={s.label}
-                >
-                  <span className="font-medium">{s.code}</span> · {s.label}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {!!codeChips.length && (
-            <div className="flex flex-wrap gap-2 mt-2">
-              {codeChips.map((c) => (
-                <span key={c.code} className="text-xs px-2 py-1 rounded-full border">
-                  {c.code} · {c.label}
+            {isOpen && suggestions.length > 0 && (
+              <div className="absolute z-20 mt-1 w-[calc(100%-3rem)] max-w-6xl max-h-72 overflow-auto border rounded-lg bg-black/90 backdrop-blur-sm">
+                {suggestions.map((s, idx) => (
                   <button
                     type="button"
-                    onClick={() => removeCode(c.code)}
-                    className="ml-2 opacity-70 hover:opacity-100"
-                    aria-label={`Remove ${c.code}`}
+                    key={s.code + idx}
+                    onMouseEnter={() => setHighlightIdx(idx)}
+                    onClick={() => {
+                      addCode(s);
+                      setProcQuery("");
+                      setIsOpen(false);
+                      inputRef.current?.focus();
+                    }}
+                    className={`w-full text-left px-3 py-2 text-sm ${idx === highlightIdx ? "bg-white/10" : ""}`}
+                    title={s.label}
                   >
-                    ×
+                    <span className="font-medium">{s.code}</span> · {s.label}
                   </button>
-                </span>
-              ))}
-              <button type="button" onClick={() => setCodeChips([])} className="text-xs px-2 py-1 rounded border">
-                Clear all
-              </button>
+                ))}
+              </div>
+            )}
+
+            {!!codeChips.length && (
+              <div className="flex flex-wrap gap-2 mt-2">
+                {codeChips.map((c) => (
+                  <span key={c.code} className="text-xs px-2 py-1 rounded-full border">
+                    {c.code} · {c.label}
+                    <button
+                      type="button"
+                      onClick={() => removeCode(c.code)}
+                      className="ml-2 opacity-70 hover:opacity-100"
+                      aria-label={`Remove ${c.code}`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                <Btn type="button" onClick={() => setCodeChips([])}>
+                  Clear all
+                </Btn>
+              </div>
+            )}
+
+            <p className="text-xs opacity-60">Tip: paste codes separated by comma/space — we’ll add them automatically later.</p>
+
+            <div className="flex flex-wrap gap-2 pt-2">
+              <Btn
+                type="button"
+                onClick={() => {
+                  clearResults();
+                }}
+                disabled={!allRows.length}
+              >
+                Clear results
+              </Btn>
+              <Btn type="button" onClick={exportRowsCSV} disabled={!filteredSortedRows.length}>
+                Export rows CSV
+              </Btn>
+              <Btn type="button" onClick={exportSummaryCSV} disabled={!filteredSortedSummary.length}>
+                Export summary CSV
+              </Btn>
             </div>
+          </section>
+
+          {error && <p className="text-sm text-rose-400">{error}</p>}
+          {loading && (
+            <motion.p
+              variants={fadeUp}
+              initial="initial"
+              animate="animate"
+              transition={{ duration: 0.3 }}
+              className="opacity-80 text-sm"
+            >
+              Analyzing…
+            </motion.p>
           )}
 
-          <p className="text-xs opacity-60">Tip: paste codes separated by comma/space — we’ll add them automatically later.</p>
-
-          <div className="flex flex-wrap gap-2 pt-2">
-            <button
-              type="button"
-              onClick={() => {
-                clearResults();
-              }}
-              className="px-3 py-2 rounded border"
-              disabled={!allRows.length}
-            >
-              Clear results
-            </button>
-            <button type="button" onClick={exportRowsCSV} disabled={!filteredSortedRows.length} className="px-3 py-2 rounded border">
-              Export rows CSV
-            </button>
-            <button
-              type="button"
-              onClick={exportSummaryCSV}
-              disabled={!filteredSortedSummary.length}
-              className="px-3 py-2 rounded border"
-            >
-              Export summary CSV
-            </button>
-          </div>
-        </section>
-
-        {error && <p className="text-red-500">{error}</p>}
-        {loading && <p className="opacity-70 text-sm">Analyzing…</p>}
-
-        {/* SUMMARY */}
-        {!!summary.length && (
-          <section className="space-y-3">
-            <div className="flex items-end gap-2 flex-wrap">
-              <h2 className="text-lg font-semibold">Executive summary</h2>
-              <div className="ml-auto flex items-center gap-2">
-                <input
-                  value={sumCodeQ}
-                  onChange={(e) => setSumCodeQ(e.target.value)}
-                  placeholder="Filter by code/description…"
-                  className="border rounded p-2 bg-transparent text-slate-100 placeholder-slate-400"
-                />
-                <button onClick={clearResults} className="px-3 py-2 rounded border">
-                  Reset
-                </button>
+          {/* SUMMARY */}
+          {!!summary.length && (
+            <section className="space-y-3">
+              <div className="flex items-end gap-2 flex-wrap">
+                <SectionTitle>Executive summary</SectionTitle>
+                <div className="ml-auto flex items-center gap-2">
+                  <input
+                    value={sumCodeQ}
+                    onChange={(e) => setSumCodeQ(e.target.value)}
+                    placeholder="Filter by code/description…"
+                    className="border rounded p-2 bg-white/5 border-white/10 text-slate-100 placeholder-slate-400"
+                  />
+                  <Btn onClick={clearResults}>Reset</Btn>
+                </div>
+                <div className="text-xs opacity-70">
+                  Showing {filteredSortedSummary.length} of {summary.length}
+                </div>
               </div>
-              <div className="text-xs opacity-70">
-                Showing {filteredSortedSummary.length} of {summary.length}
+
+              <CardShell title="Executive summary">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-white/5 text-slate-200 border-b border-white/10">
+                      <tr>
+                        <th className="p-2 text-left cursor-pointer" onClick={() => setSumSort("code")}>
+                          {headerBtn("Code", sumSortKey === "code", sumSortDir)}
+                        </th>
+                        <th className="p-2 text-left">Description</th>
+                        <th className="p-2 text-right cursor-pointer" onClick={() => setSumSort("count")}>
+                          {headerBtn("Count", sumSortKey === "count", sumSortDir)}
+                        </th>
+                        <th className="p-2 text-right cursor-pointer" onClick={() => setSumSort("min")}>
+                          {headerBtn("Min", sumSortKey === "min", sumSortDir)}
+                        </th>
+                        <th className="p-2 text-right cursor-pointer" onClick={() => setSumSort("median")}>
+                          {headerBtn("Median", sumSortKey === "median", sumSortDir)}
+                        </th>
+                        <th className="p-2 text-right cursor-pointer" onClick={() => setSumSort("p25")}>
+                          {headerBtn("P25", sumSortKey === "p25", sumSortDir)}
+                        </th>
+                        <th className="p-2 text-right cursor-pointer" onClick={() => setSumSort("p75")}>
+                          {headerBtn("P75", sumSortKey === "p75", sumSortDir)}
+                        </th>
+                        <th className="p-2 text-right cursor-pointer" onClick={() => setSumSort("max")}>
+                          {headerBtn("Max", sumSortKey === "max", sumSortDir)}
+                        </th>
+                        <th className="p-2 text-left">Top 3 cheapest</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredSortedSummary.map((s) => (
+                        <tr key={s.code} className="border-t border-white/10 hover:bg-white/[.03] align-top">
+                          <td className="p-2">{s.code}</td>
+                          <td className="p-2">{s.description}</td>
+                          <td className="p-2 text-right">{s.count}</td>
+                          <td className="p-2 text-right">{currency(s.min)}</td>
+                          <td className="p-2 text-right">{currency(s.median)}</td>
+                          <td className="p-2 text-right">{currency(s.p25)}</td>
+                          <td className="p-2 text-right">{currency(s.p75)}</td>
+                          <td className="p-2 text-right">{currency(s.max)}</td>
+                          <td className="p-2">
+                            {(s.top3?.length ?? 0) === 0 && <span className="opacity-70">No providers found</span>}
+                            <ul className="space-y-1">
+                              {(s.top3 || []).map((t, i) => (
+                                <li key={i} className="text-slate-300">
+                                  <span className="font-medium text-slate-100">{t.provider_name}</span> —{" "}
+                                  {currency(t.negotiated_rate)}
+                                </li>
+                              ))}
+                            </ul>
+                            {(s.top3?.length ?? 0) < 3 && (
+                              <div className="text-xs opacity-60">Showing {s.top3?.length || 0} of up to 3 providers</div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardShell>
+            </section>
+          )}
+
+          {/* ROWS */}
+          {!!rows.length && (
+            <section className="space-y-3">
+              <div className="flex items-end gap-2 flex-wrap">
+                <SectionTitle>Rows</SectionTitle>
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-2 w-full md:w-auto md:flex md:items-center md:gap-2 md:ml-auto">
+                  <input
+                    value={rowProviderQ}
+                    onChange={(e) => setRowProviderQ(e.target.value)}
+                    placeholder="Filter provider…"
+                    className="border rounded p-2 bg-white/5 border-white/10 text-slate-100 placeholder-slate-400"
+                  />
+                  <input
+                    value={rowCodeQ}
+                    onChange={(e) => setRowCodeQ(e.target.value)}
+                    placeholder="Filter code…"
+                    className="border rounded p-2 bg-white/5 border-white/10 text-slate-100 placeholder-slate-400"
+                  />
+                  <input
+                    value={rowMinRate}
+                    onChange={(e) => setRowMinRate(e.target.value)}
+                    placeholder="Min $"
+                    inputMode="decimal"
+                    className="border rounded p-2 bg-white/5 border-white/10 text-slate-100 placeholder-slate-400"
+                  />
+                  <input
+                    value={rowMaxRate}
+                    onChange={(e) => setRowMaxRate(e.target.value)}
+                    placeholder="Max $"
+                    inputMode="decimal"
+                    className="border rounded p-2 bg-white/5 border-white/10 text-slate-100 placeholder-slate-400"
+                  />
+                  <Btn type="button" onClick={clearResults}>
+                    Reset
+                  </Btn>
+                </div>
+                <div className="text-xs opacity-70">Showing {filteredSortedRows.length} of {rows.length}</div>
               </div>
-            </div>
 
-            <div className="overflow-x-auto border rounded">
-              <table className="min-w-full text-sm">
-                <thead className="bg-slate-50 text-slate-900">
-                  <tr>
-                    <th className="p-2 text-left cursor-pointer" onClick={() => setSumSort("code")}>
-                      {headerBtn("Code", sumSortKey === "code", sumSortDir)}
-                    </th>
-                    <th className="p-2 text-left">Description</th>
-                    <th className="p-2 text-right cursor-pointer" onClick={() => setSumSort("count")}>
-                      {headerBtn("Count", sumSortKey === "count", sumSortDir)}
-                    </th>
-                    <th className="p-2 text-right cursor-pointer" onClick={() => setSumSort("min")}>
-                      {headerBtn("Min", sumSortKey === "min", sumSortDir)}
-                    </th>
-                    <th className="p-2 text-right cursor-pointer" onClick={() => setSumSort("median")}>
-                      {headerBtn("Median", sumSortKey === "median", sumSortDir)}
-                    </th>
-                    <th className="p-2 text-right cursor-pointer" onClick={() => setSumSort("p25")}>
-                      {headerBtn("P25", sumSortKey === "p25", sumSortDir)}
-                    </th>
-                    <th className="p-2 text-right cursor-pointer" onClick={() => setSumSort("p75")}>
-                      {headerBtn("P75", sumSortKey === "p75", sumSortDir)}
-                    </th>
-                    <th className="p-2 text-right cursor-pointer" onClick={() => setSumSort("max")}>
-                      {headerBtn("Max", sumSortKey === "max", sumSortDir)}
-                    </th>
-                    <th className="p-2 text-left">Top 3 cheapest</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredSortedSummary.map((s) => (
-                    <tr key={s.code} className="border-t align-top">
-                      <td className="p-2">{s.code}</td>
-                      <td className="p-2">{s.description}</td>
-                      <td className="p-2 text-right">{s.count}</td>
-                      <td className="p-2 text-right">{currency(s.min)}</td>
-                      <td className="p-2 text-right">{currency(s.median)}</td>
-                      <td className="p-2 text-right">{currency(s.p25)}</td>
-                      <td className="p-2 text-right">{currency(s.p75)}</td>
-                      <td className="p-2 text-right">{currency(s.max)}</td>
-                      <td className="p-2">
-                        {(s.top3?.length ?? 0) === 0 && <span className="opacity-70">No providers found</span>}
-                        <ul className="space-y-1">
-                          {(s.top3 || []).map((t, i) => (
-                            <li key={i} className="text-slate-300">
-                              <span className="font-medium text-slate-100">{t.provider_name}</span> —{" "}
-                              {currency(t.negotiated_rate)}
-                            </li>
-                          ))}
-                        </ul>
-                        {(s.top3?.length ?? 0) < 3 && (
-                          <div className="text-xs opacity-60">Showing {s.top3?.length || 0} of up to 3 providers</div>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        )}
-
-        {/* ROWS */}
-        {!!rows.length && (
-          <section className="space-y-3">
-            <div className="flex items-end gap-2 flex-wrap">
-              <h2 className="text-lg font-semibold">Rows</h2>
-              <div className="grid grid-cols-1 md:grid-cols-5 gap-2 w-full md:w-auto md:flex md:items-center md:gap-2 md:ml-auto">
-                <input
-                  value={rowProviderQ}
-                  onChange={(e) => setRowProviderQ(e.target.value)}
-                  placeholder="Filter provider…"
-                  className="border rounded p-2 bg-transparent text-slate-100 placeholder-slate-400"
-                />
-                <input
-                  value={rowCodeQ}
-                  onChange={(e) => setRowCodeQ(e.target.value)}
-                  placeholder="Filter code…"
-                  className="border rounded p-2 bg-transparent text-slate-100 placeholder-slate-400"
-                />
-                <input
-                  value={rowMinRate}
-                  onChange={(e) => setRowMinRate(e.target.value)}
-                  placeholder="Min $"
-                  inputMode="decimal"
-                  className="border rounded p-2 bg-transparent text-slate-100 placeholder-slate-400"
-                />
-                <input
-                  value={rowMaxRate}
-                  onChange={(e) => setRowMaxRate(e.target.value)}
-                  placeholder="Max $"
-                  inputMode="decimal"
-                  className="border rounded p-2 bg-transparent text-slate-100 placeholder-slate-400"
-                />
-                <button type="button" onClick={clearResults} className="px-3 py-2 rounded border">
-                  Reset
-                </button>
-              </div>
-              <div className="text-xs opacity-70">Showing {filteredSortedRows.length} of {rows.length}</div>
-            </div>
-
-            <div className="overflow-x-auto border rounded">
-              <table className="min-w-full text-sm">
-                <thead className="bg-slate-50 text-slate-900">
-                  <tr>
-                    <th className="p-2 text-left cursor-pointer" onClick={() => setRowSort("provider_name")}>
-                      {headerBtn("Provider", rowSortKey === "provider_name", rowSortDir)}
-                    </th>
-                    <th className="p-2 text-left cursor-pointer" onClick={() => setRowSort("code")}>
-                      {headerBtn("Code", rowSortKey === "code", rowSortDir)}
-                    </th>
-                    <th className="p-2 text-left cursor-pointer" onClick={() => setRowSort("description")}>
-                      {headerBtn("Description", rowSortKey === "description", rowSortDir)}
-                    </th>
-                    <th className="p-2 text-left cursor-pointer" onClick={() => setRowSort("rate_type")}>
-                      {headerBtn("Type", rowSortKey === "rate_type", rowSortDir)}
-                    </th>
-                    <th className="p-2 text-right cursor-pointer" onClick={() => setRowSort("negotiated_rate")}>
-                      {headerBtn("Rate", rowSortKey === "negotiated_rate", rowSortDir)}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredSortedRows.map((r, i) => (
-                    <tr key={i} className="border-t">
-                      <td className="p-2">{String(r.provider_name ?? "")}</td>
-                      <td className="p-2">{String(r.code ?? "")}</td>
-                      <td className="p-2">{String(r.description ?? "")}</td>
-                      <td className="p-2">{String(r.rate_type ?? "")}</td>
-                      <td className="p-2 text-right">{currency(r.negotiated_rate)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        )}
-      </div>
-    </main>
+              <CardShell title="Rows">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-white/5 text-slate-200 border-b border-white/10">
+                      <tr>
+                        <th className="p-2 text-left cursor-pointer" onClick={() => setRowSort("provider_name")}>
+                          {headerBtn("Provider", rowSortKey === "provider_name", rowSortDir)}
+                        </th>
+                        <th className="p-2 text-left cursor-pointer" onClick={() => setRowSort("code")}>
+                          {headerBtn("Code", rowSortKey === "code", rowSortDir)}
+                        </th>
+                        <th className="p-2 text-left cursor-pointer" onClick={() => setRowSort("description")}>
+                          {headerBtn("Description", rowSortKey === "description", rowSortDir)}
+                        </th>
+                        <th className="p-2 text-left cursor-pointer" onClick={() => setRowSort("rate_type")}>
+                          {headerBtn("Type", rowSortKey === "rate_type", rowSortDir)}
+                        </th>
+                        <th className="p-2 text-right cursor-pointer" onClick={() => setRowSort("negotiated_rate")}>
+                          {headerBtn("Rate", rowSortKey === "negotiated_rate", rowSortDir)}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredSortedRows.map((r, i) => (
+                        <tr key={i} className="border-t border-white/10 hover:bg-white/[.03]">
+                          <td className="p-2">{String(r.provider_name ?? "")}</td>
+                          <td className="p-2">{String(r.code ?? "")}</td>
+                          <td className="p-2">{String(r.description ?? "")}</td>
+                          <td className="p-2">{String(r.rate_type ?? "")}</td>
+                          <td className="p-2 text-right">{currency(r.negotiated_rate)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardShell>
+            </section>
+          )}
+        </div>
+      </main>
+    </MotionConfig>
   );
 }
