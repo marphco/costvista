@@ -423,7 +423,7 @@ function Step1Card() {
         </div>
       </div>
       <div className="flex items-center gap-2">
-        <Chip>Max 5MB for demo</Chip>
+        <Chip>Max 50MB for demo</Chip>
         <Chip>CSV / JSON</Chip>
       </div>
       <button className="rounded-lg bg-sky-500 text-black px-4 py-2 text-sm font-medium hover:bg-sky-400">
