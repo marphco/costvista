@@ -189,19 +189,25 @@ function Btn({
   className = "",
   ...props
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & { kind?: "primary" | "ghost" | "outline" }) {
-  const base = "px-3 py-2 rounded transition text-sm";
-  const cls =
+  // Nota: le classi `disabled:*` si attivano automaticamente quando <button disabled />
+  const base =
+    "px-3 py-2 rounded transition text-sm " +
+    "disabled:opacity-40 disabled:pointer-events-none"; // niente hover/click
+
+  const variant =
     kind === "primary"
       ? "bg-sky-500 text-black hover:bg-sky-400"
       : kind === "outline"
       ? "border border-white/20 hover:bg-white/10"
       : "border hover:bg-white/10";
+
   return (
-    <button {...props} className={`${base} ${cls} ${className}`}>
+    <button {...props} className={`${base} ${variant} ${className}`}>
       {children}
     </button>
   );
 }
+
 
 function CardShell({ title, children }: { title?: string; children: ReactNode }) {
   return (
