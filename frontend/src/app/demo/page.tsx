@@ -175,8 +175,8 @@ const summarizeClient = (rows: Row[]): Summary[] => {
 ============================ */
 const fadeUp = { initial: { opacity: 0, y: 12 }, animate: { opacity: 1, y: 0 } };
 
-function Chip({ children }: { children: ReactNode }) {
-  return (
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function Chip({ children }: { children: ReactNode }) {  return (
     <span className="inline-flex items-center rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-200">
       {children}
     </span>
@@ -556,10 +556,14 @@ export default function DemoPage() {
         throw new Error(String(msg));
       }
 
-      const payload = (isApiSummaryShape(raw) ? raw : (hasDetail(raw) && isApiSummaryShape((raw as any).detail) ? (raw as any).detail : {
-        rows: [],
-        summary: [],
-      })) as ApiSummaryResponse;
+      let payload: ApiSummaryResponse;
+if (isApiSummaryShape(raw)) {
+  payload = raw;
+} else if (hasDetail(raw) && isApiSummaryShape((raw as { detail: unknown }).detail)) {
+  payload = (raw as { detail: ApiSummaryResponse }).detail;
+} else {
+  payload = { rows: [], summary: [] };
+}
 
       resetTables(payload);
       setIndexSuggestions([]);
