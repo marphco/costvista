@@ -10,17 +10,17 @@ import { MotionConfig, motion, AnimatePresence } from "framer-motion";
 const features = [
   {
     title: "Instant clarity",
-    desc: "Paste a CSV/JSON link or upload a file. Clean tables with min/median/max and top providers in seconds.",
+    desc: "Paste a CSV/JSON link or upload a file. We map headers, coerce numbers, and surface clean, filterable tables in seconds.",
     icon: UploadIcon,
   },
   {
     title: "Actionable comparisons",
-    desc: "Focus the procedures that drive spend. Search by code or description; sort results instantly.",
+    desc: "Search by code or description, filter by provider and price bands, sort instantly. Focus on the procedures that drive spend.",
     icon: FilterIcon,
   },
   {
     title: "Share & decide",
-    desc: "Export CSV or an executive summary stakeholders will actually read.",
+    desc: "Export rows to CSV or share a concise executive summary stakeholders will actually read.",
     icon: ShareIcon,
   },
 ];
@@ -28,17 +28,39 @@ const features = [
 const faqs = [
   {
     q: "Do I need huge uploads?",
-    a: "For the MVP you can upload a sample file or paste a link. We focus on the most relevant rows so you don’t wait hours.",
+    a: "No. For the MVP you can upload a sample file or paste a public link. We prioritize the most relevant rows so you don’t wait hours.",
   },
   {
     q: "Is PHI involved?",
-    a: "No. We work with public transparency files (MRFs) or non-identifiable data you provide for testing.",
+    a: "No. Costvista works with public transparency files (MRFs) or non-identifiable sample data you provide for testing.",
   },
   {
     q: "Who is it for?",
-    a: "Benefits brokers, HR and self-insured employers who need fast, defensible price comparisons.",
+    a: "Benefits brokers, HR teams, and self-insured employers who need fast, defensible price comparisons without wrangling giant files.",
   },
 ];
+
+const how = {
+  title: "How it works",
+  subtitle: "From link or upload to a decision-ready summary — in minutes.",
+  steps: [
+    {
+      id: 1,
+      title: "Point to a file",
+      body: "Paste a public CSV/JSON link or upload a sample (no PHI).",
+    },
+    {
+      id: 2,
+      title: "We clean & normalize",
+      body: "Headers standardized, rates coerced, and codes aligned so numbers line up.",
+    },
+    {
+      id: 3,
+      title: "Compare & export",
+      body: "Filter by provider/code, see min/median/P25–P75, then export rows or an executive summary.",
+    },
+  ] as const,
+};
 
 /* ----------------------------- Motion helpers ---------------------------- */
 const fadeUp = { initial: { opacity: 0, y: 16 }, animate: { opacity: 1, y: 0 } };
@@ -133,7 +155,7 @@ export default function LandingClient() {
                 Healthcare price transparency,<span className="block text-sky-300">finally usable.</span>
               </h1>
               <p className="mt-4 md:mt-5 text-base md:text-lg text-slate-300">
-                Costvista turns massive machine-readable files into crisp comparisons for brokers, HR and self-insured employers. Focus on what drives costs — not on parsing gigabytes.
+                Turn massive machine-readable files into crisp, defensible comparisons — without spreadsheets. Built for brokers, HR and self-insured employers.
               </p>
 
               <div className="mt-4 flex flex-wrap gap-4 text-xs text-slate-400">
@@ -145,7 +167,7 @@ export default function LandingClient() {
                 <Link href="/demo" className="px-5 py-3 rounded-lg bg-sky-500 text-black font-medium hover:bg-sky-400 transition">
                   Try the live demo
                 </Link>
-                <a href="#features" className="px-5 py-3 rounded-lg border border-white/20 hover:bg-white/10 transition">See features</a>
+                <a href="#how" className="px-5 py-3 rounded-lg border border-white/20 hover:bg-white/10 transition">See how it works</a>
               </div>
             </motion.div>
 
@@ -158,7 +180,7 @@ export default function LandingClient() {
               className="mt-10 md:mt-14"
             >
               <div className="relative rounded-2xl border border-white/10 bg-white/5 shadow-2xl overflow-hidden">
-                <div className="px-4 py-2 text-xs text-slate-300 border-b border-white/10">Preview — Executive Summary</div>
+                <div className="px-4 py-2 text-xs text-slate-300 border-b border-white/10">Preview — Executive summary</div>
                 <div className="p-3 md:p-6">
                   <div className="overflow-x-auto">
                     <table className="min-w-full text-xs md:text-sm">
@@ -286,23 +308,21 @@ export default function LandingClient() {
 
 /* --------------------------- Steps Showcase UI --------------------------- */
 function StepsShowcase() {
-  const steps = [
-    { id: 1, title: "Create a request in a minute", caption: "Step 1", body: <Step1Card /> },
-    { id: 2, title: "Pick procedures — get clean stats", caption: "Step 2", body: <Step2Card /> },
-    { id: 3, title: "Compare & export the best option", caption: "Step 3", body: <Step3Card /> },
-  ] as const;
-
-  const [active, setActive] = useState<(typeof steps)[number]["id"]>(1);
+  const [active, setActive] = useState<number>(how.steps[0].id);
 
   return (
     <div className="grid lg:grid-cols-2 gap-6 md:gap-10 items-start">
-      {/* Mobile prima la TIMELINE, poi le schermate; su desktop rimane a sinistra */}
+      {/* Colonna sinistra: titolo, sottotitolo, timeline */}
       <div className="order-1 lg:order-1 min-w-0">
-        <h2 className="text-2xl md:text-3xl font-semibold mb-2">Efficient price sourcing</h2>
-        <p className="text-slate-300 mb-6">Paste a link or upload, select procedures, then compare. One flow, actionable results.</p>
+        <h2 className="text-2xl md:text-3xl font-semibold mb-1">
+          {how.title}
+        </h2>
+        <p className="text-slate-300 mb-6">
+          {how.subtitle}
+        </p>
 
         <ol className="space-y-6">
-          {steps.map((s) => {
+          {how.steps.map((s) => {
             const selected = active === s.id;
             return (
               <li key={s.id} className="flex items-start gap-4">
@@ -310,20 +330,28 @@ function StepsShowcase() {
                   onClick={() => setActive(s.id)}
                   className={[
                     "shrink-0 h-11 w-11 rounded-2xl grid place-items-center border transition",
-                    selected ? "border-sky-400 text-sky-400 bg-sky-400/10" : "border-white/15 text-slate-300 bg-white/5 hover:bg-white/10",
+                    selected
+                      ? "border-sky-400 text-sky-400 bg-sky-400/10"
+                      : "border-white/15 text-slate-300 bg-white/5 hover:bg-white/10",
                   ].join(" ")}
                   aria-pressed={selected}
                 >
                   {s.id}
                 </button>
+
                 <div className="pt-0.5 min-w-0">
-                  <div className="text-xs text-slate-400">{s.caption}</div>
                   <button
                     onClick={() => setActive(s.id)}
-                    className={["text-left text-lg md:text-xl leading-snug transition", selected ? "text-white" : "text-slate-200 hover:text-white"].join(" ")}
+                    className={[
+                      "text-left text-lg md:text-xl leading-snug transition",
+                      selected ? "text-white" : "text-slate-200 hover:text-white",
+                    ].join(" ")}
                   >
                     {s.title}
                   </button>
+                  <p className="mt-1 text-sm text-slate-300">
+                    {s.body}
+                  </p>
                 </div>
               </li>
             );
@@ -331,15 +359,20 @@ function StepsShowcase() {
         </ol>
 
         <div className="mt-8">
-          <Link href="/demo" className="inline-flex items-center gap-2 rounded-xl bg-sky-500 text-black px-5 py-3 font-medium hover:bg-sky-400 transition">
+          <Link
+            href="/demo"
+            className="inline-flex items-center gap-2 rounded-xl bg-sky-500 text-black px-5 py-3 font-medium hover:bg-sky-400 transition"
+          >
             Get started
-            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor"><path strokeWidth="2" strokeLinecap="round" d="M5 12h14m-6-6l6 6-6 6" /></svg>
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor">
+              <path strokeWidth="2" strokeLinecap="round" d="M5 12h14m-6-6l6 6-6 6" />
+            </svg>
           </Link>
           <div className="text-xs text-slate-400 mt-2">*No signup. Public data only.</div>
         </div>
       </div>
 
-      {/* Destra: pannello visual con animazione di altezza smooth, nessuna scrollbar interna */}
+      {/* Colonna destra: pannello visual che cambia con lo step attivo */}
       <motion.div
         layout
         transition={{ type: "spring", stiffness: 220, damping: 30 }}
