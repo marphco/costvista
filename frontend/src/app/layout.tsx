@@ -12,16 +12,35 @@ export const metadata: Metadata = {
   title: "CostVista",
   description: "Healthcare price transparency made usable.",
   applicationName: "CostVista",
-  icons: {
-        icon: '/icon.svg', // For general favicons
-        apple: '/apple-icon.png', // For Apple touch icons
-        shortcut: '/favicon.ico', // For legacy favicon.ico
-      },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="en" className="scroll-smooth">
+      <head>
+        <link rel="shortcut icon" href="/assets/favicon.ico" />
+        <link
+          rel="apple-icon"
+          sizes="180x180"
+          href="/assets/apple-icon.png"
+        />
+        <link
+          rel="icon"
+          type="image/png"
+          sizes="32x32"
+          href="/assets/favicon-32x32.png"
+        />
+        <link
+          rel="icon"
+          type="image/png"
+          sizes="16x16"
+          href="/assets/favicon-16x16.png"
+        />
+      </head>
       <body>{children}</body>
     </html>
   );
