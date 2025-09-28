@@ -12,18 +12,16 @@ export const metadata: Metadata = {
   title: "CostVista",
   description: "Healthcare price transparency made usable.",
   applicationName: "CostVista",
-  // ⚠️ NIENTE icons/manifest qui: Next userà automaticamente /icon.svg
+  icons: {
+        icon: '/icon.svg', // For general favicons
+        apple: '/apple-icon.png', // For Apple touch icons
+        shortcut: '/favicon.ico', // For legacy favicon.ico
+      },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="scroll-smooth">
-      <head>
-        {/* (Opzionale) solo per icona su Home Screen iOS */}
-        {/* <link rel="apple-touch-icon" sizes="180x180" href="/apple-icon.png" /> */}
-        <link rel="icon" type="image/svg+xml" href="icon.svg" />
-        <meta name="apple-mobile-web-app-title" content="CostVista" />
-      </head>
       <body>{children}</body>
     </html>
   );
