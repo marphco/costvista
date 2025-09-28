@@ -5,6 +5,7 @@ import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { MotionConfig, motion, AnimatePresence } from "framer-motion";
+import HeroCinematic from "./HeroCinematic";
 
 /* ----------------------------- Content data ----------------------------- */
 const features = [
@@ -32,7 +33,7 @@ const faqs = [
   },
   {
     q: "Is PHI involved?",
-    a: "No. Costvista works with public transparency files (MRFs) or non-identifiable sample data you provide for testing.",
+    a: "No. CostVista works with public transparency files (MRFs) or non-identifiable sample data you provide for testing.",
   },
   {
     q: "Who is it for?",
@@ -78,14 +79,14 @@ export default function LandingClient() {
           <div className="mx-auto max-w-6xl px-3 md:px-4 py-3 flex items-center justify-between">
             <Link href="/" className="flex items-center gap-3">
               <Image
-                src="/assets/costvista.svg"
-                alt="Costvista"
+                src="/assets/CostVista.svg"
+                alt="CostVista"
                 width={240}
                 height={64}
                 priority
                 className="h-12 md:h-14 w-auto drop-shadow-[0_1px_0_rgba(255,255,255,0.35)] [filter:brightness(1.15)]"
               />
-              <span className="sr-only">Costvista</span>
+              <span className="sr-only">CostVista</span>
             </Link>
 
             {/* Desktop nav */}
@@ -142,15 +143,15 @@ export default function LandingClient() {
             <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
           </div>
 
-          <div className="relative mx-auto max-w-6xl px-3 md:px-4 py-16 md:py-24">
-            <motion.div
-              variants={fadeUp}
-              initial="initial"
-              whileInView="animate"
-              transition={{ duration: 0.6, ease: "easeOut" }}
-              viewport={{ once: true, amount: 0.4 }}
-              className="max-w-3xl"
-            >
+          <div className="relative mx-auto max-w-6xl px-3 md:px-4 md:py-1">
+           <motion.div
+  variants={fadeIn}
+  initial="initial"
+  whileInView="animate"
+  transition={{ duration: 0.6, ease: "easeOut" }}
+  viewport={{ once: true, amount: 0.3 }}
+  className="mt-10 md:mt-14"
+>
               <h1 className="text-balance text-4xl md:text-6xl font-semibold leading-tight">
                 Healthcare price transparency,<span className="block text-sky-300">finally usable.</span>
               </h1>
@@ -163,12 +164,13 @@ export default function LandingClient() {
                 <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-sky-400" />Public data only (no PHI)</span>
               </div>
 
-              <div className="mt-7 md:mt-8 flex flex-wrap gap-3">
+              <div className="mt-7 md:mt-8 flex flex-wrap gap-3 mb-9">
                 <Link href="/demo" className="px-5 py-3 rounded-lg bg-sky-500 text-black font-medium hover:bg-sky-400 transition">
                   Try the live demo
                 </Link>
                 <a href="#how" className="px-5 py-3 rounded-lg border border-white/20 hover:bg-white/10 transition">See how it works</a>
               </div>
+              <HeroCinematic/>
             </motion.div>
 
             <motion.div
@@ -179,7 +181,7 @@ export default function LandingClient() {
               viewport={{ once: true, amount: 0.3 }}
               className="mt-10 md:mt-14"
             >
-              <div className="relative rounded-2xl border border-white/10 bg-white/5 shadow-2xl overflow-hidden">
+              {/* <div className="relative rounded-2xl border border-white/10 bg-white/5 shadow-2xl overflow-hidden">
                 <div className="px-4 py-2 text-xs text-slate-300 border-b border-white/10">Preview — Executive summary</div>
                 <div className="p-3 md:p-6">
                   <div className="overflow-x-auto">
@@ -216,35 +218,54 @@ export default function LandingClient() {
                   </div>
                 </div>
                 <div className="pointer-events-none absolute -bottom-24 left-1/2 h-48 w-[42rem] -translate-x-1/2 rounded-full bg-sky-500/10 blur-3xl" />
-              </div>
+              </div> */}
             </motion.div>
           </div>
         </section>
 
         {/* ------------------------------- Features ------------------------------ */}
-        <section id="features" className="mx-auto max-w-6xl px-3 md:px-4 py-12 md:py-16 scroll-mt-24">
-          <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
-            {features.map((f, idx) => {
-              const Icon = f.icon;
-              return (
-                <motion.div
-                  key={f.title}
-                  initial={{ opacity: 0, y: 12 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5, delay: 0.05 * idx }}
-                  viewport={{ once: true, amount: 0.4 }}
-                  className="rounded-2xl border border-white/10 p-5 md:p-6 bg-white/5 hover:-translate-y-1 hover:shadow-lg transition"
-                >
-                  <div className="mb-3 inline-flex h-9 w-9 items-center justify-center rounded-lg bg-sky-500/15">
-                    <Icon className="h-5 w-5 text-sky-300" />
-                  </div>
-                  <h3 className="text-base md:text-lg font-semibold">{f.title}</h3>
-                  <p className="mt-1 md:mt-2 text-slate-300 text-sm md:text-base">{f.desc}</p>
-                </motion.div>
-              );
-            })}
+<section id="features" className="mx-auto max-w-6xl px-3 md:px-4 py-12 md:py-16 scroll-mt-24">
+  {/* Heading */}
+  <motion.div
+    variants={fadeUp}
+    initial="initial"
+    whileInView="animate"
+    transition={{ duration: 0.5, ease: "easeOut" }}
+    viewport={{ once: true, amount: 0.5 }}
+    className="mb-6 md:mb-8"
+  >
+    <h2 className="text-2xl md:text-3xl font-semibold mb-1">
+      Why teams choose CostVista
+    </h2>
+    <p className="text-slate-300">
+      From the first file to a shareable summary — tools that make transparency data actually usable.
+    </p>
+  </motion.div>
+
+  {/* Cards */}
+  <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
+    {features.map((f, idx) => {
+      const Icon = f.icon;
+      return (
+        <motion.div
+          key={f.title}
+          initial={{ opacity: 0, y: 12 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.05 * idx }}
+          viewport={{ once: true, amount: 0.4 }}
+          className="rounded-2xl border border-white/10 p-5 md:p-6 bg-white/5 hover:-translate-y-1 hover:shadow-lg transition"
+        >
+          <div className="mb-3 inline-flex h-9 w-9 items-center justify-center rounded-lg bg-sky-500/15">
+            <Icon className="h-5 w-5 text-sky-300" />
           </div>
-        </section>
+          <h3 className="text-base md:text-lg font-semibold">{f.title}</h3>
+          <p className="mt-1 md:mt-2 text-slate-300 text-sm md:text-base">{f.desc}</p>
+        </motion.div>
+      );
+    })}
+  </div>
+</section>
+
 
         {/* ------------------------ Steps Showcase (hero-like) ------------------- */}
         <section id="how" className="mx-auto max-w-6xl px-3 md:px-4 pb-12 md:pb-16 scroll-mt-24">
@@ -293,7 +314,7 @@ export default function LandingClient() {
         {/* -------------------------------- Footer -------------------------------- */}
         <footer className="border-t border-white/10">
           <div className="mx-auto max-w-6xl px-3 md:px-4 py-6 md:py-8 text-xs md:text-sm text-slate-400 flex items-center justify-between">
-            <span>© {new Date().getFullYear()} Costvista</span>
+            <span>© {new Date().getFullYear()} CostVista</span>
             <div className="flex items-center gap-3">
               <Link href="/demo" className="hover:underline">Demo</Link>
               <a href="#features" className="hover:underline">Features</a>
