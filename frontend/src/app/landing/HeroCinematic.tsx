@@ -234,7 +234,7 @@ export default function HeroCinematic() {
 
         {/* chips + badge pausa allineato a destra su DESKTOP;
             su MOBILE: i chip stanno su un solo rigo (scroll orizzontale) e niente pausa */}
-        <div className="mt-5 flex items-center gap-2 text-[9px] md:text-xs">
+        <div className="mt-5 flex items-center gap-2 text-[9.5px] md:text-xs">
           <div
             className={[
               "min-w-0 flex items-center gap-1",
