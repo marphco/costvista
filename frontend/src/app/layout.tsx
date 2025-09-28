@@ -13,7 +13,7 @@ export const metadata: Metadata = {
   description: "Healthcare price transparency made usable.",
   applicationName: "CostVista",
   // Diciamo a Next dove sta il manifest (quello in /public)
-  manifest: "/manifest.webmanifest",
+  manifest: "/site.webmanifest",
   // Non dichiariamo icon qui: i browser troveranno i file standard in /public
 };
 
