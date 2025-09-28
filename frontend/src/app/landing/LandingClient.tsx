@@ -79,7 +79,7 @@ export default function LandingClient() {
           <div className="mx-auto max-w-6xl px-3 md:px-4 py-3 flex items-center justify-between">
             <Link href="/" className="flex items-center gap-3">
               <Image
-                src="/assets/CostVista.svg"
+                src="/assets/costvista.svg"
                 alt="CostVista"
                 width={240}
                 height={64}
