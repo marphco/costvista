@@ -40,7 +40,7 @@ const DESKTOP_TIMELINE: Timeline = {
     { to: { x: 52, y: 226 }, duration: 1.2, ease: "easeInOut", click: true, waitAfterMs: 600 },
   ],
   processingBarMs: 1600,
-  ready: [{ to: { x: 855, y: 170 }, duration: 1.2, ease: "easeOut", click: true, waitAfterMs: 1400 }],
+  ready: [{ to: { x: 940, y: 170 }, duration: 1.2, ease: "easeOut", click: true, waitAfterMs: 1400 }],
 };
 
 // MOBILE (placeholder iniziale: modificalo liberamente)
@@ -54,8 +54,8 @@ const MOBILE_TIMELINE: Timeline = {
 };
 
 // Altezza fissa del box scene (evita shift del layout)
-const SCENE_H_DESKTOP = 300; // px
-const SCENE_H_MOBILE = 380;  // px
+const SCENE_H_DESKTOP = 280; // px
+const SCENE_H_MOBILE = 350;  // px
 
 /** ↑ FINE TUNE AREA ↑ **/
 
@@ -234,7 +234,7 @@ export default function HeroCinematic() {
 
         {/* chips + badge pausa allineato a destra su DESKTOP;
             su MOBILE: i chip stanno su un solo rigo (scroll orizzontale) e niente pausa */}
-        <div className="mt-5 flex items-center gap-2 text-[10px] md:text-xs">
+        <div className="mt-5 flex items-center gap-2 text-[9px] md:text-xs">
           <div
             className={[
               "min-w-0 flex items-center gap-1",
