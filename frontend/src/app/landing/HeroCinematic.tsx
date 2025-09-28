@@ -50,7 +50,7 @@ const MOBILE_TIMELINE: Timeline = {
     { to: { x: 56, y: 310 }, duration: 1.1, ease: "easeInOut", click: true, waitAfterMs: 500 },
   ],
   processingBarMs: 1400,
-  ready: [{ to: { x: 250, y: 180 }, duration: 1.0, ease: "easeOut", click: true, waitAfterMs: 1100 }],
+  ready: [{ to: { x: 230, y: 170 }, duration: 1.0, ease: "easeOut", click: true, waitAfterMs: 1100 }],
 };
 
 // Altezza fissa del box scene (evita shift del layout)
