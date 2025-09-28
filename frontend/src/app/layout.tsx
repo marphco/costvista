@@ -19,11 +19,8 @@ export const metadata: Metadata = {
       { url: "/favicon.ico" },
     ],
     apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
-    // other: [
-    //   { rel: "mask-icon", url: "/safari-pinned-tab.svg", color: "#0B1220" }, // opzionale
-    // ],
   },
-};
+} as const;
 
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
