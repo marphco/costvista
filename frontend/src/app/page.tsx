@@ -3,9 +3,9 @@ import type { Metadata } from "next";
 import LandingClient from "./landing/LandingClient";
 
 export const metadata: Metadata = {
-  title: "Costvista — Price transparency made usable",
+  title: "“CostVista — Price transparency made usable",
   description:
-    "Turn massive healthcare machine-readable files into crisp, comparable insights. Built for brokers, HR and self-insured employers.",
+    "CostVista transforms massive healthcare price files into clean comparisons for brokers, HR, and employers.",
 };
 
 export default function Home() {

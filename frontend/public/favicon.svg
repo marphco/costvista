@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="1000"><style>
+    #light-icon {
+      display: inline;
+    }
+    #dark-icon {
+      display: none;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      #light-icon {
+        display: none;
+      }
+      #dark-icon {
+        display: inline;
+      }
+    }
+  </style><g id="light-icon"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="1000"><g><g transform="matrix(1.953125,0,0,1.953125,0,0)"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" width="512" height="512"><svg version="1.2" baseProfile="tiny" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px" viewBox="0 0 512 512" overflow="visible" xml:space="preserve">
+<g>
+	<path fill="#1F4B7F" d="M217.5,225.2L126.2,256l91.3,30.8v78.8L41.3,306.1V205.9l176.1-59.4V225.2z"></path>
+	<path fill="#06B6D4" d="M470.7,205.9v100.2l-176.1,59.4v-78.8l91.3-30.8l-91.3-30.8v-78.8L470.7,205.9z"></path>
+</g>
+</svg></svg></g></g></svg></g><g id="dark-icon"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="1000"><g clip-path="url(#SvgjsClipPath1011)"><rect width="1000" height="1000" fill="#ffffff"></rect><g transform="matrix(1.3671875,0,0,1.3671875,150,150)"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" width="512" height="512"><svg version="1.2" baseProfile="tiny" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px" viewBox="0 0 512 512" overflow="visible" xml:space="preserve">
+<g>
+	<path fill="#1F4B7F" d="M217.5,225.2L126.2,256l91.3,30.8v78.8L41.3,306.1V205.9l176.1-59.4V225.2z"></path>
+	<path fill="#06B6D4" d="M470.7,205.9v100.2l-176.1,59.4v-78.8l91.3-30.8l-91.3-30.8v-78.8L470.7,205.9z"></path>
+</g>
+</svg></svg></g></g><defs><clipPath id="SvgjsClipPath1011"><rect width="1000" height="1000" x="0" y="0" rx="350" ry="350"></rect></clipPath></defs></svg></g></svg>
