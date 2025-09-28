@@ -2,8 +2,14 @@
 "use client";
 
 import * as React from "react";
-import { motion, useAnimation, AnimatePresence } from "framer-motion";
-import type { Transition } from "framer-motion";
+import {
+  motion,
+  AnimatePresence,
+  animate,
+  useMotionValue,
+  useTransform,
+} from "framer-motion";
+import type { Transition, AnimationPlaybackControls, MotionValue } from "framer-motion";
 
 /* =========================
    Config: timelines & types
@@ -27,13 +33,10 @@ type Timeline = {
   ready: Keyframe[];
 };
 
-// AnimatePresence exit timing
 const EXIT_MS = 280;
 const EASE_DEFAULT: Ease = "easeOut";
 
-/** ⬇ TUNE AREA: coord & timing ⬇ */
-
-// DESKTOP (tuoi valori — invariati)
+// DESKTOP: invariato
 const DESKTOP_TIMELINE: Timeline = {
   upload: [
     { to: { x: 18, y: 92 }, duration: 1.2, ease: "easeOut" },
@@ -43,7 +46,7 @@ const DESKTOP_TIMELINE: Timeline = {
   ready: [{ to: { x: 940, y: 170 }, duration: 1.2, ease: "easeOut", click: true, waitAfterMs: 1400 }],
 };
 
-// MOBILE (placeholder iniziale: modificalo liberamente)
+// MOBILE: invariato
 const MOBILE_TIMELINE: Timeline = {
   upload: [
     { to: { x: 22, y: 58 }, duration: 1.0, ease: "easeOut" },
@@ -53,27 +56,45 @@ const MOBILE_TIMELINE: Timeline = {
   ready: [{ to: { x: 230, y: 190 }, duration: 1.0, ease: "easeOut", click: true, waitAfterMs: 1100 }],
 };
 
-// Altezza fissa del box scene (evita shift del layout)
-const SCENE_H_DESKTOP = 280; // px
-const SCENE_H_MOBILE = 350;  // px
+const SCENE_H_DESKTOP = 280;
+const SCENE_H_MOBILE = 350;
 
-/** ↑ FINE TUNE AREA ↑ **/
-
-// Alias controls (tip-safe, una sola definizione)
-type Controls = ReturnType<typeof useAnimation>;
+/* utils */
+function truncateMiddle(s: string, head = 28, tail = 12) {
+  if (s.length <= head + tail + 3) return s;
+  return `${s.slice(0, head)}…${s.slice(-tail)}`;
+}
 
 export default function HeroCinematic() {
   const [scene, setScene] = React.useState<Scene>(0);
   const [paused, setPaused] = React.useState(false);
+  const pausedRef = React.useRef(false);
+  React.useEffect(() => { pausedRef.current = paused; }, [paused]);
+
   const [isMobile, setIsMobile] = React.useState(false);
 
-  const cursor = useAnimation();
-  const click = useAnimation();
-  const progress = useAnimation();
+  // Cursor come MotionValues => possiamo pause/play senza resettare
+  const cx = useMotionValue(16);
+  const cy = useMotionValue(40);
+
+  // Click flash rimane con Framer motion component animation
+//   const clickFlashCtrl = React.useRef<AnimationPlaybackControls | null>(null);
+
+  // Progress come MotionValue 0..100
+  const progressMV = useMotionValue(0);
+  const progressWidth = useTransform(progressMV, v => `${v}%`);
+  const clickScale = useMotionValue(0.6);
+const clickOpacity = useMotionValue(0);
+const clickScaleCtrl = React.useRef<AnimationPlaybackControls | null>(null);
+const clickOpacityCtrl = React.useRef<AnimationPlaybackControls | null>(null);
+
+  // Playback controls correnti (così in pausa facciamo .pause())
+  const cursorCtrls = React.useRef<{ x?: AnimationPlaybackControls; y?: AnimationPlaybackControls }>({});
+  const progressCtrl = React.useRef<AnimationPlaybackControls | null>(null);
 
   const runIdRef = React.useRef(0);
 
-  // Breakpoint (<=768)
+  // Breakpoint
   React.useEffect(() => {
     const mql = window.matchMedia("(max-width: 768px)");
     const update = () => setIsMobile(mql.matches);
@@ -82,65 +103,83 @@ export default function HeroCinematic() {
     return () => mql.removeEventListener?.("change", update);
   }, []);
 
-  const hardStop = React.useCallback(() => {
-    cursor.stop();
-    click.stop();
-    progress.stop();
-  }, [cursor, click, progress]);
+  // Hover pause/resume (solo desktop)
+  const onPause = React.useCallback(() => {
+  if (isMobile) return;
+  setPaused(true);
+  cursorCtrls.current.x?.pause?.();
+  cursorCtrls.current.y?.pause?.();
+  progressCtrl.current?.pause?.();
+  clickScaleCtrl.current?.pause?.();
+  clickOpacityCtrl.current?.pause?.();
+}, [isMobile]);
 
-  // Pausa solo desktop (hover). Su mobile è disabilitata.
-  const requestPause = React.useCallback(() => {
-    if (isMobile) return;
-    setPaused(true);
-    hardStop();
-    runIdRef.current += 1; // invalida subito la timeline corrente
-  }, [hardStop, isMobile]);
+const onResume = React.useCallback(() => {
+  if (isMobile) return;
+  if (!paused) return;
+  setPaused(false);
+  cursorCtrls.current.x?.play?.();
+  cursorCtrls.current.y?.play?.();
+  progressCtrl.current?.play?.();
+  clickScaleCtrl.current?.play?.();
+  clickOpacityCtrl.current?.play?.();
+}, [paused, isMobile]);
 
-  const requestResume = React.useCallback(() => {
-    if (isMobile) return;
-    if (!paused) return;
-    setPaused(false);
-  }, [paused, isMobile]);
+
+  // Attende rispettando la pausa (l'elapsed non avanza in pausa)
+  const waitCancellable = React.useCallback((ms: number, isCancelled: () => boolean) =>
+    new Promise<void>((resolve) => {
+      let elapsed = 0;
+      let last = performance.now();
+      const step = (now: number) => {
+        if (isCancelled()) return resolve();
+        if (pausedRef.current) { last = now; requestAnimationFrame(step); return; }
+        elapsed += now - last;
+        last = now;
+        if (elapsed >= ms) return resolve();
+        requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    }), []);
 
   React.useEffect(() => {
-    if (paused) return;
-
     const timeline = isMobile ? MOBILE_TIMELINE : DESKTOP_TIMELINE;
     let cancelled = false;
     const myRun = ++runIdRef.current;
+    const isCancelled = () => cancelled || myRun !== runIdRef.current;
 
-    const isCancelled = () => cancelled || myRun !== runIdRef.current || paused;
+    const clickFlash = async () => {
+  if (isCancelled()) return;
+  // flash-in veloce
+  clickScaleCtrl.current = animate(clickScale, 1, { duration: 0.08 });
+  clickOpacityCtrl.current = animate(clickOpacity, 0.8, { duration: 0.08 });
+  await Promise.all([
+    clickScaleCtrl.current.finished,
+    clickOpacityCtrl.current.finished,
+  ]);
+  if (isCancelled()) return;
+  // decay: si allarga e svanisce
+  clickScaleCtrl.current = animate(clickScale, 1.25, { duration: 0.28, ease: "easeOut" });
+  clickOpacityCtrl.current = animate(clickOpacity, 0, { duration: 0.28, ease: "linear" });
+  await Promise.all([
+    clickScaleCtrl.current.finished,
+    clickOpacityCtrl.current.finished,
+  ]);
+};
 
-    const waitCancellable = (ms: number) =>
-      new Promise<void>((resolve) => {
-        const start = performance.now();
-        const tick = () => {
-          if (isCancelled()) return resolve();
-          const now = performance.now();
-          if (now - start >= ms) resolve();
-          else requestAnimationFrame(tick);
-        };
-        requestAnimationFrame(tick);
-      });
-
-    const clickFlash = async (ctrl: Controls) => {
-      if (isCancelled()) return;
-      await ctrl.start({ scale: 1, opacity: 0.8, transition: { duration: 0.08 } });
-      if (isCancelled()) return;
-      await ctrl.start({ scale: 1.25, opacity: 0, transition: { duration: 0.28 } });
-    };
 
     const moveCursor = async (kf: Keyframe) => {
       if (isCancelled()) return;
-      await cursor.start({
-        x: kf.to.x,
-        y: kf.to.y,
-        transition: { duration: kf.duration, ease: kf.ease ?? EASE_DEFAULT },
-      });
+      cursorCtrls.current.x = animate(cx, kf.to.x, { duration: kf.duration, ease: kf.ease ?? EASE_DEFAULT });
+      cursorCtrls.current.y = animate(cy, kf.to.y, { duration: kf.duration, ease: kf.ease ?? EASE_DEFAULT });
+      await Promise.all([
+        cursorCtrls.current.x.finished,
+        cursorCtrls.current.y.finished,
+      ]);
       if (isCancelled()) return;
-      if (kf.click) await clickFlash(click);
+      if (kf.click) await clickFlash();
       if (isCancelled()) return;
-      if (kf.waitAfterMs) await waitCancellable(kf.waitAfterMs);
+      if (kf.waitAfterMs) await waitCancellable(kf.waitAfterMs, isCancelled);
     };
 
     (async () => {
@@ -155,42 +194,49 @@ export default function HeroCinematic() {
 
         // Scene 1
         setScene(1);
-        await waitCancellable(EXIT_MS + 40); // attendi il mount
-        await progress.start({ width: "0%" });
-        if (isCancelled()) break;
-        await progress.start({
-          width: "100%",
-          transition: { duration: timeline.processingBarMs / 1000, ease: [0.22, 1, 0.36, 1] },
+        await waitCancellable(EXIT_MS + 40, isCancelled);
+        progressMV.set(0);
+        progressCtrl.current = animate(progressMV, 100, {
+          duration: timeline.processingBarMs / 1000,
+          ease: [0.22, 1, 0.36, 1],
         });
+        await progressCtrl.current.finished;
         if (isCancelled()) break;
-        await waitCancellable(300);
+        await waitCancellable(300, isCancelled);
 
         // Scene 2
         setScene(2);
-        await waitCancellable(EXIT_MS + 40);
+        await waitCancellable(EXIT_MS + 40, isCancelled);
         for (const kf of timeline.ready) {
           await moveCursor(kf);
           if (isCancelled()) break;
         }
         if (isCancelled()) break;
 
-        await waitCancellable(400); // respiro prima del loop
+        await waitCancellable(400, isCancelled);
       }
     })();
 
     return () => {
-      cancelled = true;
-    };
-  }, [paused, isMobile, cursor, click, progress]);
+  cancelled = true;
+  // ✅ “fotografiamo” i controlli correnti, così il cleanup usa riferimenti stabili
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const { x, y } = cursorCtrls.current;
+  const pc = progressCtrl.current;
 
-  // height fissa del box scene
+  x?.stop?.();
+  y?.stop?.();
+  pc?.stop?.();
+};
+  }, [isMobile, cx, cy, progressMV, waitCancellable, clickScale, clickOpacity]);
+
   const sceneHeight = (isMobile ? SCENE_H_MOBILE : SCENE_H_DESKTOP) + "px";
   const pauseLabelDesktop = paused ? "Paused — Click or hover out" : "Hover to pause";
 
   return (
     <div
-      onMouseEnter={requestPause}
-      onMouseLeave={requestResume}
+      onMouseEnter={onPause}
+      onMouseLeave={onResume}
       className="relative rounded-2xl border border-white/10 bg-white/5 shadow-2xl overflow-hidden"
       aria-label="Costvista cinematic demo"
     >
@@ -206,40 +252,36 @@ export default function HeroCinematic() {
       {/* WRAPPER con height fissa delle scene */}
       <div className="relative p-4 md:p-6">
         <div className="relative w-full overflow-hidden" style={{ height: sceneHeight }}>
-          {/* Cursor: sopra ai componenti */}
+          {/* Cursor basato su motion values */}
           <motion.div
-            aria-hidden
-            className="pointer-events-none absolute top-0 left-0 z-50"
-            animate={cursor}
-            initial={{ x: 16, y: 40 }}
-          >
-            <div className="relative">
-              <div className="h-4 w-4 rounded-full bg-white/90 shadow" />
-              <motion.span
-                className="absolute -inset-3 rounded-full border border-white/40"
-                animate={click}
-                initial={{ scale: 0.6, opacity: 0 }}
-                style={{ pointerEvents: "none" }}
-              />
-            </div>
-          </motion.div>
+  aria-hidden
+  className="pointer-events-none absolute top-0 left-0 z-50"
+  style={{ x: cx as MotionValue<number>, y: cy as MotionValue<number> }}
+>
+  <div className="relative">
+    <div className="h-4 w-4 rounded-full bg-white/90 shadow" />
+    {/* anello click (ora animato e pausable) */}
+    <motion.span
+      className="absolute -inset-3 rounded-full border border-white/40"
+      style={{ scale: clickScale, opacity: clickOpacity }}
+    />
+  </div>
+</motion.div>
 
-          {/* SCENES sovrapposte (no layout shift) */}
+          {/* SCENES */}
           <AnimatePresence mode="wait">
             {scene === 0 && <SceneUpload key="s0" />}
-            {scene === 1 && <SceneProcessing key="s1" progress={progress} />}
+            {scene === 1 && <SceneProcessing key="s1" progressWidth={progressWidth} />}
             {scene === 2 && <SceneReady key="s2" />}
           </AnimatePresence>
         </div>
 
-        {/* chips + badge pausa allineato a destra su DESKTOP;
-            su MOBILE: i chip stanno su un solo rigo (scroll orizzontale) e niente pausa */}
+        {/* chips + badge pausa */}
         <div className="mt-5 flex items-center gap-2 text-[9.5px] md:text-xs">
           <div
             className={[
               "min-w-0 flex items-center gap-1",
               "flex-nowrap overflow-x-auto whitespace-nowrap",
-              // nascondo scrollbar su Mobile (tailwind JIT)
               "[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
             ].join(" ")}
           >
@@ -250,7 +292,7 @@ export default function HeroCinematic() {
             <Chip active={scene === 2}>Summary ready</Chip>
           </div>
 
-          {/* badge pausa: solo desktop, nella stessa riga */}
+          {/* badge pausa: solo desktop */}
           <div className="ml-auto hidden md:flex">
             <div
               className={[
@@ -276,11 +318,12 @@ export default function HeroCinematic() {
   );
 }
 
-/* ------------------------------- Scenes --------------------------------
-   Le scene sono assolute (inset-0) dentro al box a height fissa.
---------------------------------------------------------------------------- */
+/* ------------------------------- Scenes -------------------------------- */
 
 function SceneUpload() {
+  const fullUrl = "https://hospital.org/prices/sample_hospital_mrf.csv";
+  const short = truncateMiddle(fullUrl);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -293,7 +336,10 @@ function SceneUpload() {
       <div className="grid md:grid-cols-2 gap-3">
         <Panel>
           <Label>Paste URL</Label>
-          <Field>https://hospital.org/prices/sample_hospital_mrf.csv</Field>
+          <Field>
+            <span className="md:hidden block max-w-full truncate">{short}</span>
+            <span className="hidden md:block">{fullUrl}</span>
+          </Field>
         </Panel>
         <Panel>
           <Label>Or upload</Label>
@@ -313,7 +359,7 @@ function SceneUpload() {
   );
 }
 
-function SceneProcessing({ progress }: { progress: Controls }) {
+function SceneProcessing({ progressWidth }: { progressWidth: MotionValue<string> }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -327,7 +373,7 @@ function SceneProcessing({ progress }: { progress: Controls }) {
       <Panel>
         <div className="text-xs text-slate-400 mb-2">Normalizing headers…</div>
         <div className="h-2 w-full rounded bg-white/10 overflow-hidden">
-          <motion.div className="h-2 rounded bg-sky-400/80" animate={progress} initial={{ width: "0%" }} />
+          <motion.div className="h-2 rounded bg-sky-400/80" style={{ width: progressWidth }} />
         </div>
         <div className="mt-3 flex flex-wrap gap-2 text-[11px] md:text-xs">
           <Tag>Mapping codes</Tag>
