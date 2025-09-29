@@ -80,7 +80,8 @@ export default function LandingClient() {
             <Link href="/" className="flex items-center gap-3">
               <Image
                 src="/assets/costvista.svg"
-                alt="CostVista"
+                alt=""
+                aria-hidden="true"
                 width={240}
                 height={64}
                 priority
