@@ -236,9 +236,10 @@ export default function DemoPage() {
         <Link href="/" className="flex items-center gap-3">
           <Image
             src="/assets/costvista.svg"
-            alt="Costvista"
+            alt=""
             width={240}
             height={64}
+            aria-hidden="true"
             priority
             className="h-12 md:h-14 w-auto drop-shadow-[0_1px_0_rgba(255,255,255,0.35)] [filter:brightness(1.15)]"
           />
