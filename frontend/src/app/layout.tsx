@@ -6,7 +6,20 @@ export const metadata: Metadata = {
   title: "CostVista — Price transparency made usable",
   description:
     "CostVista transforms massive healthcare price files into clean comparisons for brokers, HR, and employers.",
-};
+icons: {
+    // Favicon per i tab (Safari userà uno di questi)
+    icon: [
+      { url: "/favicon.ico" }, // ICO = sizes:any, super compatibile
+      { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+      { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
+      // facoltativo: { url: "/favicon.png", sizes: "64x64", type: "image/png" },
+    ],
+    // iOS per "Aggiungi a Home"
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
+    // opzionale per Safari macOS pinned tab
+    other: [{ rel: "mask-icon", url: "/safari-pinned-tab.svg", color: "#0ea5e9" }],
+  },
+}
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
