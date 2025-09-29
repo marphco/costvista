@@ -75,7 +75,7 @@ export default function LandingClient() {
     <MotionConfig reducedMotion="user">
       <main className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-black text-slate-100">
         {/* ------------------------------- Header ------------------------------- */}
-        <header className="sticky top-0 z-50 border-b border-white/10 backdrop-blur supports-[backdrop-filter]:bg-white/5">
+        <header className="sticky top-0 z-60 border-b border-white/10 backdrop-blur supports-[backdrop-filter]:bg-white/5">
           <div className="mx-auto max-w-6xl px-3 md:px-4 py-3 flex items-center justify-between">
             <Link href="/" className="flex items-center gap-3">
               <Image
