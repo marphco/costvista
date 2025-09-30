@@ -320,6 +320,7 @@ export default function LandingClient() {
               <Link href="/demo" className="hover:underline">Demo</Link>
               <a href="#features" className="hover:underline">Features</a>
               <a href="#faq" className="hover:underline">FAQ</a>
+              <Link href="/methodology" className="hover:underline">Methodology</Link>
             </div>
           </div>
         </footer>

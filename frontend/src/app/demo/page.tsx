@@ -14,6 +14,9 @@ import {
   type DragEvent,
 } from "react";
 import { MotionConfig, motion } from "framer-motion";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+
 
 /* ============================
    Demo paths (unica fonte)
@@ -73,7 +76,14 @@ type Summary = {
   top3: TopItem[];
 };
 
-type ApiSummaryResponse = { rows?: Row[]; summary?: Summary[] };
+type Meta = { source?: string; fetched_at?: string; index_month_hint?: string | null };
+
+type ApiSummaryResponse = {
+  rows?: Row[];
+  summary?: Summary[];
+  meta?: Meta;   // <-- AGGIUNTO
+};
+
 type ApiError = { detail?: string; error?: string; message?: string; suggestions?: string[] };
 
 type CodeItem = { code: string; label: string };
@@ -259,7 +269,11 @@ export default function DemoPage() {
 
   /* ---------- Source state (hooks dentro al componente!) ---------- */
   const [source, setSource] = useState<Source | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const isActiveDemo = (p: Source | null, path: DemoPath) => !!(p && p.kind === "demo" && p.path === path);
+
+  const [activePreset, setActivePreset] = useState<"A" | "B" | "C" | "COMPARE" | null>(null);
+
 
   /* ---------- Upload ---------- */
   const [uploading, setUploading] = useState(false);
@@ -267,6 +281,17 @@ export default function DemoPage() {
   const [progress, setProgress] = useState<number>(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [indexSuggestions, setIndexSuggestions] = useState<string[]>([]);
+
+  const [pdfHeader, setPdfHeader] = useState<string>("");
+const [pdfLogo, setPdfLogo] = useState<string | null>(null);
+
+function onPdfLogoChange(e: ChangeEvent<HTMLInputElement>) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => setPdfLogo(String(reader.result)); // dataURL
+  reader.readAsDataURL(file);
+}
 
   function handleFileUpload(file: File) {
     setUploadErr(null);
@@ -355,6 +380,9 @@ export default function DemoPage() {
       setRows(mergedRows);
       setSummary(summarizeClient(mergedRows));
       setSource({ kind: "upload", name: `${files.length} files`, size: 0, type: "mixed" });
+      
+      setMeta({ source: `${files.length} file(s) uploaded`, fetched_at: new Date().toISOString(), index_month_hint: null });
+    
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
@@ -382,6 +410,7 @@ export default function DemoPage() {
   const boxRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [catalog] = useState(COMMON_CPT);
+  const [meta, setMeta] = useState<Meta | null>(null);
 
   const [debouncedQ, setDebouncedQ] = useState("");
   useEffect(() => {
@@ -490,6 +519,7 @@ export default function DemoPage() {
     setProcQuery("");
     setDebouncedQ("");
     setIndexSuggestions([]);
+    setActivePreset(null);
   }
 
   useEffect(() => {
@@ -510,10 +540,13 @@ export default function DemoPage() {
 
   async function analyzeURL(hrefOrLocalPath: string) {
     if (isDemoPath(hrefOrLocalPath)) {
-      setSource({ kind: "demo", path: hrefOrLocalPath });
-    } else {
-      setSource({ kind: "url", href: hrefOrLocalPath });
-    }
+  if (hrefOrLocalPath.endsWith("sample_hospital_mrf.csv")) setActivePreset("A");
+  else if (hrefOrLocalPath.endsWith("sample_hospital_mrf_plan_b.csv")) setActivePreset("B");
+  else if (hrefOrLocalPath.endsWith("sample_hospital_mrf_plan_c.json")) setActivePreset("C");
+} else {
+  setActivePreset(null);
+}
+
 
     setLoading(true);
     setError(null);
@@ -559,14 +592,15 @@ export default function DemoPage() {
 
       let payload: ApiSummaryResponse;
 if (isApiSummaryShape(raw)) {
-  payload = raw;
+  payload = raw as ApiSummaryResponse;
 } else if (hasDetail(raw) && isApiSummaryShape((raw as { detail: unknown }).detail)) {
   payload = (raw as { detail: ApiSummaryResponse }).detail;
 } else {
   payload = { rows: [], summary: [] };
 }
+resetTables(payload);
+setMeta(payload.meta ?? { source: hrefOrLocalPath, fetched_at: new Date().toISOString(), index_month_hint: null });
 
-      resetTables(payload);
       setIndexSuggestions([]);
       setProgress(100);
     } catch (err: unknown) {
@@ -584,6 +618,7 @@ if (isApiSummaryShape(raw)) {
     setError(null);
     setRows([]);
     setSummary([]);
+    setActivePreset("COMPARE");
     setProgress(0);
     try {
       const parts = await Promise.all(
@@ -610,7 +645,10 @@ if (isApiSummaryShape(raw)) {
       setAllSummary(summarizeClient(merged));
       setRows(merged);
       setSummary(summarizeClient(merged));
+      
       setSource({ kind: "demo", path: paths[0] });
+      setMeta({ source: "Compare A + B + C", fetched_at: new Date().toISOString(), index_month_hint: null });
+      
       setProgress(100);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -721,6 +759,87 @@ if (isApiSummaryShape(raw)) {
     a.click();
   }
 
+  function exportSummaryPDF() {
+  if (!filteredSortedSummary.length) return;
+
+  const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+  const now = new Date().toISOString().replace("T", " ").replace("Z", "");
+
+  // --- Header con logo/intestazione opzionali ---
+  let headerY = 40;
+  const leftX = 40;
+
+  if (pdfLogo) {
+    try {
+      doc.addImage(pdfLogo, "PNG", leftX, 24, 120, 40);
+      headerY = 80;
+    } catch {}
+  }
+
+  doc.setFontSize(14);
+  doc.text(pdfHeader || "CostVista — Executive Summary", leftX, headerY);
+  doc.setFontSize(10);
+
+  const metaLine = [
+    meta?.source ? `Source: ${meta.source}` : null,
+    meta?.index_month_hint ? `Index month: ${meta.index_month_hint}` : null,
+    `Generated: ${now}`,
+  ]
+    .filter(Boolean)
+    .join("   •   ");
+  doc.text(metaLine, leftX, headerY + 18);
+
+  // 🔽🔽🔽  *** MANCAVA QUESTO BLOCCO ***  🔽🔽🔽
+  const head = [
+    ["Code", "Description", "Count", "Min", "Median", "P25", "P75", "Max", "Top 3 cheapest"],
+  ];
+
+  const body = filteredSortedSummary.map((s) => {
+    const tops = (s.top3 || [])
+      .map((t) => `${t.provider_name} ($${Number(t.negotiated_rate || 0).toFixed(2)})`)
+      .join("  ·  ");
+    return [
+      s.code,
+      String(s.description || ""),
+      String(s.count || 0),
+      `$${Number(s.min || 0).toFixed(2)}`,
+      `$${Number(s.median || 0).toFixed(2)}`,
+      `$${Number(s.p25 || 0).toFixed(2)}`,
+      `$${Number(s.p75 || 0).toFixed(2)}`,
+      `$${Number(s.max || 0).toFixed(2)}`,
+      tops,
+    ];
+  });
+  // 🔼🔼🔼  *** FINE BLOCCO ***  🔼🔼🔼
+
+  autoTable(doc, {
+    head,
+    body,
+    // se c'è il logo, parti comunque sotto l'header:
+    startY: Math.max(headerY + 28, 86),
+    styles: { fontSize: 9, cellPadding: 4, overflow: "linebreak" },
+    headStyles: { fillColor: [30, 41, 59] },
+    columnStyles: { 1: { cellWidth: 260 }, 8: { cellWidth: 260 } },
+    bodyStyles: { valign: "top" },
+    didDrawPage: () => {
+      doc.setFontSize(8);
+      const width = doc.internal.pageSize.getWidth();
+      const height = doc.internal.pageSize.getHeight();
+      const foot1 =
+        "Methodology: in-network negotiated rates from public TiC MRFs; min/median/P25–P75/max; top-3 by lowest rate.";
+      const foot2 = "Generated with CostVista — © CostVista";
+      doc.text(foot1, 40, height - 40, { maxWidth: width - 80 });
+      doc.text(foot2, 40, height - 24);
+
+      const str = `Page ${doc.getCurrentPageInfo().pageNumber} of ${doc.getNumberOfPages()}`;
+      doc.text(str, width - 40, height - 24, { align: "right" });
+    },
+  });
+
+  doc.save("costvista_summary.pdf");
+}
+
+
   /* ---------- UI ---------- */
   const SourceBadge = () => {
     if (!source) return null;
@@ -798,42 +917,43 @@ if (isApiSummaryShape(raw)) {
               {/* Demo buttons + URL toggle */}
               <div className="flex flex-wrap items-center gap-2 mt-4">
                 <Btn
-                  type="button"
-                  kind={isActiveDemo(source, "/data/sample_hospital_mrf.csv") ? "primary" : "outline"}
-                  onClick={() => analyzeURL("/data/sample_hospital_mrf.csv")}
-                >
-                  Demo A (CSV)
-                </Btn>
+  type="button"
+  kind={activePreset === "A" ? "primary" : "outline"}
+  onClick={() => analyzeURL("/data/sample_hospital_mrf.csv")}
+>
+  Demo A (CSV)
+</Btn>
 
-                <Btn
-                  type="button"
-                  kind={isActiveDemo(source, "/data/sample_hospital_mrf_plan_b.csv") ? "primary" : "outline"}
-                  onClick={() => analyzeURL("/data/sample_hospital_mrf_plan_b.csv")}
-                >
-                  Demo B (CSV)
-                </Btn>
+<Btn
+  type="button"
+  kind={activePreset === "B" ? "primary" : "outline"}
+  onClick={() => analyzeURL("/data/sample_hospital_mrf_plan_b.csv")}
+>
+  Demo B (CSV)
+</Btn>
 
-                <Btn
-                  type="button"
-                  kind={isActiveDemo(source, "/data/sample_hospital_mrf_plan_c.json") ? "primary" : "outline"}
-                  onClick={() => analyzeURL("/data/sample_hospital_mrf_plan_c.json")}
-                >
-                  Demo C (JSON)
-                </Btn>
+<Btn
+  type="button"
+  kind={activePreset === "C" ? "primary" : "outline"}
+  onClick={() => analyzeURL("/data/sample_hospital_mrf_plan_c.json")}
+>
+  Demo C (JSON)
+</Btn>
 
-                <Btn
-                  type="button"
-                  kind="outline"
-                  onClick={() =>
-                    analyzeManyURLs([
-                      "/data/sample_hospital_mrf.csv",
-                      "/data/sample_hospital_mrf_plan_b.csv",
-                      "/data/sample_hospital_mrf_plan_c.json",
-                    ])
-                  }
-                >
-                  Compare A + B + C
-                </Btn>
+<Btn
+  type="button"
+  kind={activePreset === "COMPARE" ? "primary" : "outline"}
+  onClick={() =>
+    analyzeManyURLs([
+      "/data/sample_hospital_mrf.csv",
+      "/data/sample_hospital_mrf_plan_b.csv",
+      "/data/sample_hospital_mrf_plan_c.json",
+    ])
+  }
+>
+  Compare A + B + C
+</Btn>
+
 
                 <div className="ml-2">
                   <SourceBadge />
@@ -971,6 +1091,27 @@ if (isApiSummaryShape(raw)) {
               <Btn type="button" onClick={exportSummaryCSV} disabled={!filteredSortedSummary.length}>
                 Export summary CSV
               </Btn>
+              <Btn type="button" onClick={exportSummaryPDF} disabled={!filteredSortedSummary.length}>
+  Export summary PDF
+</Btn>
+
+<div className="flex flex-wrap gap-2 items-center">
+  <input
+  type="text"
+  placeholder="Header (optional)"
+  value={pdfHeader}
+  onChange={(e) => setPdfHeader(e.target.value)}
+  className="border rounded p-2 bg-white/5 border-white/10 text-slate-100 placeholder-slate-400 w-56"
+/>
+
+<label className="text-xs opacity-80">
+  <span className="mr-2">Logo (optional):</span>
+  <input type="file" accept="image/*" onChange={onPdfLogoChange} />
+</label>
+
+</div>
+
+
             </div>
           </section>
 
@@ -1005,6 +1146,26 @@ if (isApiSummaryShape(raw)) {
                   Showing {filteredSortedSummary.length} of {summary.length}
                 </div>
               </div>
+
+{meta && (
+  <div className="text-xs text-slate-300 flex flex-wrap gap-2 items-center">
+    <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
+      <span className="opacity-70">Source:</span> <span className="font-medium">{meta.source}</span>
+    </span>
+    {meta.fetched_at && (
+      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
+        <span className="opacity-70">Last fetch:</span>{" "}
+        {meta.fetched_at.replace("T"," ").replace("Z","")}
+      </span>
+    )}
+    {meta.index_month_hint && (
+      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
+        <span className="opacity-70">Index month:</span> {meta.index_month_hint}
+      </span>
+    )}
+  </div>
+)}
+
 
               <CardShell title="Executive summary">
                 <div className="overflow-x-auto">

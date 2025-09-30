@@ -11,6 +11,8 @@
   "dependencies": {
     "dotenv": "^17.2.2",
     "framer-motion": "^12.23.19",
+    "jspdf": "^3.0.3",
+    "jspdf-autotable": "^5.0.2",
     "next": "15.5.3",
     "react": "19.1.0",
     "react-dom": "19.1.0"
@@ -28,7 +30,6 @@
     "tailwindcss": "^4.1.13",
     "typescript": "^5"
   },
-
   "browserslist": {
     "production": [
       "Chrome >= 97",
@@ -43,5 +44,4 @@
       "last 1 safari version"
     ]
   }
-
 }

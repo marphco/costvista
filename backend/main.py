@@ -4,6 +4,8 @@ from pydantic import BaseModel  # type: ignore
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import csv, io, json, httpx, re  # type: ignore
+from datetime import datetime, timezone
+import re as _re
 
 app = FastAPI(title="Costvista API")
 
@@ -106,6 +108,11 @@ def _coerce_float(val) -> float:
         return float(s)
     except Exception:
         return 0.0
+    
+def _infer_index_month(url_or_name: str) -> Optional[str]:
+    # es. .../2025-02-01_uhc_index.json -> 2025-02
+    m = _re.search(r'(\d{4}-\d{2})-\d{2}', url_or_name)
+    return m.group(1) if m else None
 
 # ========= Header normalization (ibrida: regole + hook AI) =========
 
@@ -372,7 +379,17 @@ async def summary(req: SummaryReq):
     res = _summarize(rows)
     if not req.include_rows:
         res.pop("rows", None)
+
+    # ---- META (DENTRO la funzione) ----
+    meta = {
+        "source": req.url,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "index_month_hint": _infer_index_month(req.url),
+        "include_rows": req.include_rows,
+    }
+    res["meta"] = meta
     return res
+
 
 # -------- Upload (50MB) --------
 MAX_SIZE_BYTES = 50 * 1024 * 1024
@@ -448,4 +465,13 @@ async def summary_upload(
     res = _summarize(rows)
     if not include_rows:
         res.pop("rows", None)
+
+    # ---- META (DENTRO la funzione) ----
+    meta = {
+        "source": getattr(file, "filename", "upload"),
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "index_month_hint": _infer_index_month(getattr(file, "filename", "")),
+        "include_rows": include_rows,
+    }
+    res["meta"] = meta
     return res
