@@ -195,28 +195,38 @@ function Chip({ children }: { children: ReactNode }) {  return (
 
 function Btn({
   children,
-  kind = "ghost",
+  kind = "secondary",
+  active = false,
   className = "",
   ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { kind?: "primary" | "ghost" | "outline" }) {
-  // Nota: le classi `disabled:*` si attivano automaticamente quando <button disabled />
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  kind?: "primary" | "secondary" | "outline" | "danger" | "ghost";
+  active?: boolean;
+}) {
   const base =
-    "px-3 py-2 rounded transition text-sm " +
-    "disabled:opacity-40 disabled:pointer-events-none"; // niente hover/click
+    "h-9 px-3 rounded-lg text-sm transition inline-flex items-center justify-center " +
+    "ring-1 ring-inset focus:outline-none focus:ring-2 focus:ring-sky-400/60 " +
+    "disabled:opacity-40 disabled:pointer-events-none";
 
-  const variant =
-    kind === "primary"
-      ? "bg-sky-500 text-black hover:bg-sky-400"
-      : kind === "outline"
-      ? "border border-white/20 hover:bg-white/10"
-      : "border hover:bg-white/10";
+  const variants: Record<string, string> = {
+    primary: "bg-sky-500 text-black hover:bg-sky-400 ring-transparent",
+    secondary: "bg-white/5 text-slate-100 hover:bg-white/10 ring-white/15",
+    outline: "bg-transparent text-slate-100 hover:bg-white/10 ring-white/25",
+    danger: "bg-transparent text-rose-400 hover:bg-rose-400/10 ring-white/20",
+    ghost: "bg-transparent text-slate-300 hover:bg-white/10 ring-transparent",
+  };
+
+  // se `active` forziamo l’aspetto “primary” (usato per i preset demo selezionati)
+  const resolved =
+    active && kind !== "danger" && kind !== "ghost" ? variants.primary : variants[kind];
 
   return (
-    <button {...props} className={`${base} ${variant} ${className}`}>
+    <button {...props} className={`${base} ${resolved} ${className}`} aria-pressed={active}>
       {children}
     </button>
   );
 }
+
 
 
 function CardShell({ title, children }: { title?: string; children: ReactNode }) {
@@ -284,6 +294,27 @@ export default function DemoPage() {
 
   const [pdfHeader, setPdfHeader] = useState<string>("");
 const [pdfLogo, setPdfLogo] = useState<string | null>(null);
+
+useEffect(() => {
+  // load
+  const h = localStorage.getItem("cv_pdf_header");
+  const l = localStorage.getItem("cv_pdf_logo");
+  if (h) setPdfHeader(h);
+  if (l) setPdfLogo(l);
+}, []);
+
+useEffect(() => {
+  localStorage.setItem("cv_pdf_header", pdfHeader || "");
+}, [pdfHeader]);
+
+useEffect(() => {
+  if (pdfLogo) localStorage.setItem("cv_pdf_logo", pdfLogo);
+  else localStorage.removeItem("cv_pdf_logo");
+}, [pdfLogo]);
+
+function clearLogo() {
+  setPdfLogo(null);
+}
 
 function onPdfLogoChange(e: ChangeEvent<HTMLInputElement>) {
   const file = e.target.files?.[0];
@@ -789,7 +820,6 @@ setMeta(payload.meta ?? { source: hrefOrLocalPath, fetched_at: new Date().toISOS
     .join("   •   ");
   doc.text(metaLine, leftX, headerY + 18);
 
-  // 🔽🔽🔽  *** MANCAVA QUESTO BLOCCO ***  🔽🔽🔽
   const head = [
     ["Code", "Description", "Count", "Min", "Median", "P25", "P75", "Max", "Top 3 cheapest"],
   ];
@@ -810,7 +840,6 @@ setMeta(payload.meta ?? { source: hrefOrLocalPath, fetched_at: new Date().toISOS
       tops,
     ];
   });
-  // 🔼🔼🔼  *** FINE BLOCCO ***  🔼🔼🔼
 
   autoTable(doc, {
     head,
@@ -916,53 +945,62 @@ setMeta(payload.meta ?? { source: hrefOrLocalPath, fetched_at: new Date().toISOS
 
               {/* Demo buttons + URL toggle */}
               <div className="flex flex-wrap items-center gap-2 mt-4">
-                <Btn
-  type="button"
-  kind={activePreset === "A" ? "primary" : "outline"}
-  onClick={() => analyzeURL("/data/sample_hospital_mrf.csv")}
->
-  Demo A (CSV)
-</Btn>
+  <Btn
+    type="button"
+    kind="secondary"
+    active={activePreset === "A"}
+    onClick={() => analyzeURL("/data/sample_hospital_mrf.csv")}
+  >
+    Demo A (CSV)
+  </Btn>
 
-<Btn
-  type="button"
-  kind={activePreset === "B" ? "primary" : "outline"}
-  onClick={() => analyzeURL("/data/sample_hospital_mrf_plan_b.csv")}
->
-  Demo B (CSV)
-</Btn>
+  <Btn
+    type="button"
+    kind="secondary"
+    active={activePreset === "B"}
+    onClick={() => analyzeURL("/data/sample_hospital_mrf_plan_b.csv")}
+  >
+    Demo B (CSV)
+  </Btn>
 
-<Btn
-  type="button"
-  kind={activePreset === "C" ? "primary" : "outline"}
-  onClick={() => analyzeURL("/data/sample_hospital_mrf_plan_c.json")}
->
-  Demo C (JSON)
-</Btn>
+  <Btn
+    type="button"
+    kind="secondary"
+    active={activePreset === "C"}
+    onClick={() => analyzeURL("/data/sample_hospital_mrf_plan_c.json")}
+  >
+    Demo C (JSON)
+  </Btn>
 
-<Btn
-  type="button"
-  kind={activePreset === "COMPARE" ? "primary" : "outline"}
-  onClick={() =>
-    analyzeManyURLs([
-      "/data/sample_hospital_mrf.csv",
-      "/data/sample_hospital_mrf_plan_b.csv",
-      "/data/sample_hospital_mrf_plan_c.json",
-    ])
-  }
->
-  Compare A + B + C
-</Btn>
+  <Btn
+    type="button"
+    kind="secondary"
+    active={activePreset === "COMPARE"}
+    onClick={() =>
+      analyzeManyURLs([
+        "/data/sample_hospital_mrf.csv",
+        "/data/sample_hospital_mrf_plan_b.csv",
+        "/data/sample_hospital_mrf_plan_c.json",
+      ])
+    }
+  >
+    Compare A + B + C
+  </Btn>
 
+  <div className="ml-2">
+    <SourceBadge />
+  </div>
 
-                <div className="ml-2">
-                  <SourceBadge />
-                </div>
+  <Btn
+    type="button"
+    className="ml-auto"
+    kind="outline"
+    onClick={() => setShowUrlBox((v) => !v)}
+  >
+    {showUrlBox ? "Hide URL (advanced)" : "Show URL (advanced)"}
+  </Btn>
+</div>
 
-                <Btn type="button" className="ml-auto" kind="outline" onClick={() => setShowUrlBox((v) => !v)}>
-                  {showUrlBox ? "Hide URL (advanced)" : "Show URL (advanced)"}
-                </Btn>
-              </div>
 
               {showUrlBox && (
                 <div className="flex flex-col gap-2 mt-3">
@@ -1075,44 +1113,114 @@ setMeta(payload.meta ?? { source: hrefOrLocalPath, fetched_at: new Date().toISOS
 
             <p className="text-xs opacity-60">Tip: paste codes separated by comma/space — we’ll add them automatically later.</p>
 
-            <div className="flex flex-wrap gap-2 pt-2">
-              <Btn
-                type="button"
-                onClick={() => {
-                  clearResults();
-                }}
-                disabled={!allRows.length}
-              >
-                Clear results
-              </Btn>
-              <Btn type="button" onClick={exportRowsCSV} disabled={!filteredSortedRows.length}>
-                Export rows CSV
-              </Btn>
-              <Btn type="button" onClick={exportSummaryCSV} disabled={!filteredSortedSummary.length}>
-                Export summary CSV
-              </Btn>
-              <Btn type="button" onClick={exportSummaryPDF} disabled={!filteredSortedSummary.length}>
-  Export summary PDF
-</Btn>
+           {/* Actions + Branding */}
+<div className="mt-3 grid grid-cols-1 lg:grid-cols-12 gap-3">
+  {/* Left: Export actions */}
+  <div className="lg:col-span-7">
+    <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+      <div className="text-xs text-slate-300 mb-2">Export</div>
 
-<div className="flex flex-wrap gap-2 items-center">
-  <input
-  type="text"
-  placeholder="Header (optional)"
-  value={pdfHeader}
-  onChange={(e) => setPdfHeader(e.target.value)}
-  className="border rounded p-2 bg-white/5 border-white/10 text-slate-100 placeholder-slate-400 w-56"
-/>
+      <div className="flex flex-wrap gap-2">
+       <div className="flex flex-wrap items-center gap-2">
+  <Btn type="button" kind="outline" onClick={exportRowsCSV} disabled={!filteredSortedRows.length}>
+    Export rows CSV
+  </Btn>
 
-<label className="text-xs opacity-80">
-  <span className="mr-2">Logo (optional):</span>
-  <input type="file" accept="image/*" onChange={onPdfLogoChange} />
-</label>
+  <Btn type="button" kind="outline" onClick={exportSummaryCSV} disabled={!filteredSortedSummary.length}>
+    Export summary CSV
+  </Btn>
 
+  <Btn type="button" kind="outline" onClick={exportSummaryPDF} disabled={!filteredSortedSummary.length}>
+    Export summary PDF
+  </Btn>
+
+  <Btn
+    type="button"
+    kind="danger"
+    onClick={() => {
+      if (window.confirm("Clear all loaded data and filters?")) clearResults();
+    }}
+    disabled={!allRows.length}
+    className="ml-auto"
+    title="Remove all loaded data"
+  >
+    Clear results
+  </Btn>
 </div>
 
 
-            </div>
+        <div className="text-xs opacity-70 self-center">
+          {filteredSortedSummary.length
+            ? `Ready: ${filteredSortedSummary.length} summary rows`
+            : "Load data to enable exports"}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {/* Right: Branding (title + logo) */}
+  <div className="lg:col-span-5">
+    <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+      <div className="text-xs text-slate-300 mb-2">Branding (optional)</div>
+
+      <div className="flex flex-col gap-3 md:flex-row md:items-start">
+        {/* Report title */}
+        <div className="flex-1">
+          <label className="block text-xs opacity-80 mb-1">Report title</label>
+          <input
+            type="text"
+            placeholder="CostVista — Executive Summary"
+            value={pdfHeader}
+            onChange={(e) => setPdfHeader(e.target.value)}
+            className="w-full border rounded p-2 bg-white/5 border-white/10 text-slate-100 placeholder-slate-400"
+          />
+          <div className="text-[11px] opacity-60 mt-1">Shown at the top of the PDF.</div>
+        </div>
+
+        {/* Logo picker + preview */}
+        <div className="w-full md:w-48">
+          <label className="block text-xs opacity-80 mb-1">Logo</label>
+
+          <div className="flex items-center gap-2">
+            <input
+              id="logoInput"
+              type="file"
+              accept="image/*"
+              onChange={onPdfLogoChange}
+              className="hidden"
+            />
+            <label
+              htmlFor="logoInput"
+              className="cursor-pointer px-3 py-2 rounded border border-white/20 hover:bg-white/10 text-sm"
+            >
+              Choose file
+            </label>
+            {pdfLogo && (
+              <button
+                type="button"
+                onClick={clearLogo}
+                className="text-xs underline opacity-80 hover:opacity-100"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+
+          <div className="mt-2 h-16 rounded border border-dashed border-white/15 bg-black/30 flex items-center justify-center overflow-hidden">
+            {pdfLogo ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={pdfLogo} alt="Logo preview" className="max-h-16 max-w-full object-contain" />
+            ) : (
+              <span className="text-xs opacity-50">No logo</span>
+            )}
+          </div>
+          <div className="text-[11px] opacity-60 mt-1">PNG/JPG/SVG. Scaled automatically.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
           </section>
 
           {error && <p className="text-sm text-rose-400">{error}</p>}
