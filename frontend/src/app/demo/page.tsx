@@ -76,7 +76,7 @@ type Summary = {
   top3: TopItem[];
 };
 
-type Meta = { source?: string; fetched_at?: string; index_month_hint?: string | null };
+type Meta = { source?: string; source_inner?: string | null; fetched_at?: string; index_month_hint?: string | null };
 
 type ApiSummaryResponse = {
   rows?: Row[];
@@ -89,6 +89,20 @@ type ApiError = { detail?: string; error?: string; message?: string; suggestions
 type CodeItem = { code: string; label: string };
 type CodeChip = { code: string; label: string };
 type Dir = "asc" | "desc";
+
+type ZipInnerRequired = {
+  error: "zip_inner_required";
+  message?: string;
+  inner_files?: string[];
+};
+
+type IndexDetected = {
+  error: "index_detected";
+  suggestions?: string[];
+};
+
+type Handled409Error = Error & { handled409: true };
+
 
 /* ============================
    Type guards
@@ -185,6 +199,7 @@ const summarizeClient = (rows: Row[]): Summary[] => {
 ============================ */
 const fadeUp = { initial: { opacity: 0, y: 12 }, animate: { opacity: 1, y: 0 } };
 
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function Chip({ children }: { children: ReactNode }) {  return (
     <span className="inline-flex items-center rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-200">
@@ -192,6 +207,26 @@ function Chip({ children }: { children: ReactNode }) {  return (
     </span>
   );
 }
+
+function makeHandled409Error(): Handled409Error {
+  const e = new Error("Handled409") as Handled409Error;
+  e.handled409 = true;
+  return e;
+}
+
+
+function isZipInnerRequired(x: unknown): x is ZipInnerRequired {
+  if (typeof x !== "object" || x === null) return false;
+  const obj = x as Record<string, unknown>;
+  return obj.error === "zip_inner_required" && (!("inner_files" in obj) || Array.isArray(obj.inner_files));
+}
+
+function isIndexDetected(x: unknown): x is IndexDetected {
+  if (typeof x !== "object" || x === null) return false;
+  const obj = x as Record<string, unknown>;
+  return obj.error === "index_detected" && (!("suggestions" in obj) || Array.isArray(obj.suggestions));
+}
+
 
 function Btn({
   children,
@@ -294,6 +329,8 @@ export default function DemoPage() {
 
   const [pdfHeader, setPdfHeader] = useState<string>("");
 const [pdfLogo, setPdfLogo] = useState<string | null>(null);
+const [zipInnerFiles, setZipInnerFiles] = useState<string[]>([]);
+const [pendingZipFile, setPendingZipFile] = useState<File | null>(null);
 
 const LS = {
   header: "cv.pdf.header",
@@ -364,16 +401,36 @@ function onPdfLogoChange(e: ChangeEvent<HTMLInputElement>) {
   reader.readAsDataURL(file);
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function handleUploadResponse(status: number, data: unknown, file?: File) {
+  // Caso A: Index CMS
+  if (isIndexDetected(data)) {
+    setIndexSuggestions(data.suggestions ?? []);
+    setShowUrlBox(true);
+    return { handled: true };
+  }
+
+  // Caso B: ZIP multi-inner
+  if (isZipInnerRequired(data) && file) {
+    setPendingZipFile(file);
+    setZipInnerFiles(data.inner_files ?? []);
+    setShowUrlBox(true);
+    return { handled: true };
+  }
+
+  return { handled: false };
+}
+
   function handleFileUpload(file: File) {
     setUploadErr(null);
     if (file.size > 50 * 1024 * 1024) {
-      setUploadErr("File too large. Max 50MB.");
-      return;
-    }
-    if (!/(csv|json)$/i.test(file.name)) {
-      setUploadErr("Unsupported format. Use .csv or .json.");
-      return;
-    }
+  setUploadErr("File too large. Max 50MB for now.");
+  return;
+}
+if (!/(csv|json|gz|zip)$/i.test(file.name)) {
+  setUploadErr("Unsupported format. Use .csv, .json, .gz or .zip.");
+  return;
+}
 
     setUploading(true);
     setProgress(0);
@@ -392,49 +449,113 @@ function onPdfLogoChange(e: ChangeEvent<HTMLInputElement>) {
       setUploading(false);
     };
     xhr.onload = () => {
-      try {
-        let data: unknown;
-        try {
-          data = JSON.parse(xhr.responseText) as unknown;
-        } catch {
-          data = { detail: xhr.responseText || "Server returned a non-JSON response." };
-        }
+  try {
+    let data: unknown;
+    try {
+      data = JSON.parse(xhr.responseText);
+    } catch {
+      data = { detail: xhr.responseText || "Server returned a non-JSON response." };
+    }
 
-        if (xhr.status >= 200 && xhr.status < 300) {
-          const payload = isApiSummaryShape(data) ? data : { rows: [], summary: [] };
-          resetTables(payload);
-          setSource({ kind: "upload", name: file.name, size: file.size, type: file.type });
-          setProgress(100);
-        } else {
-          const d = (isApiErrorShape(data) ? data : { detail: `Upload error (HTTP ${xhr.status}).` }) as ApiError;
-          setUploadErr(typeof d.detail === "string" && d.detail.trim() ? d.detail : `Upload error (HTTP ${xhr.status}).`);
-        }
-      } catch {
-        setUploadErr("Unexpected error while reading the server response.");
-      } finally {
-               setUploading(false);
-        setTimeout(() => setProgress(0), 600);
+    // 👉 Normalizza: alcune risposte arrivano come { detail: {...} }
+    const body = hasDetail(data) ? (data as { detail: unknown }).detail : data;
+
+    // 409 guidato (index CMS o ZIP multi-inner) -> niente errore rosso
+    if (xhr.status === 409) {
+      if (isIndexDetected(body)) {
+        setIndexSuggestions((body as IndexDetected).suggestions ?? []);
+        setShowUrlBox(true);
+        setUploadErr(null);
+        setUploading(false);
+        setProgress(0);
+        return;
       }
-    };
+      if (isZipInnerRequired(body)) {
+        if (file) setPendingZipFile(file);
+        setZipInnerFiles((body as ZipInnerRequired).inner_files ?? []);
+        setShowUrlBox(true);
+        setUploadErr(null);
+        setUploading(false);
+        setProgress(0);
+        return;
+      }
+    }
+
+    // Successo 2xx
+    if (xhr.status >= 200 && xhr.status < 300) {
+      const payload = isApiSummaryShape(body) ? (body as ApiSummaryResponse) : { rows: [], summary: [] };
+      resetTables(payload);
+      setSource({ kind: "upload", name: file.name, size: file.size, type: file.type });
+      setMeta(
+        payload.meta ?? { source: file.name, fetched_at: new Date().toISOString(), index_month_hint: null }
+      );
+      setProgress(100);
+      return;
+    }
+
+    // Errori non-2xx (diversi da 409 gestito sopra)
+    const u = body;
+    if (isIndexDetected(u) && Array.isArray(u.suggestions) && u.suggestions.length) {
+      setIndexSuggestions(u.suggestions);
+      setShowUrlBox(true);
+      setUploadErr(null);
+    } else if (isZipInnerRequired(u) && Array.isArray(u.inner_files) && u.inner_files.length) {
+      if (file) setPendingZipFile(file);
+      setZipInnerFiles(u.inner_files);
+      setShowUrlBox(true);
+      setUploadErr(null);
+    } else {
+      const err: ApiError = isApiErrorShape(u) ? (u as ApiError) : { detail: `Upload error (HTTP ${xhr.status}).` };
+      const msg =
+        (typeof err.detail === "string" && err.detail.trim()) ||
+        (typeof err.message === "string" && err.message.trim()) ||
+        `Upload error (HTTP ${xhr.status}).`;
+      setUploadErr(msg);
+    }
+  } catch {
+    setUploadErr("Unexpected error while reading the server response.");
+  } finally {
+    setUploading(false);
+    setTimeout(() => setProgress(0), 600);
+  }
+};
+
     xhr.send(form);
   }
 
   async function uploadOne(file: File): Promise<{ rows: Row[]; summary: Summary[] }> {
-    const form = new FormData();
-    form.append("file", file);
-    const resp = await fetch(`${API}/api/summary_upload`, { method: "POST", body: form });
-    const data: unknown = await resp.json();
+  const form = new FormData();
+  form.append("file", file);
 
-    if (!resp.ok) {
-      const err = (isApiErrorShape(data) && (data.detail || data.message)) || "Upload error";
-      throw new Error(String(err));
-    }
+  const resp = await fetch(`${API}/api/summary_upload`, { method: "POST", body: form });
+  const data: unknown = await resp.json().catch(() => ({}));
+  const body = hasDetail(data) ? (data as { detail: unknown }).detail : data;
 
-    const payload: ApiSummaryResponse = isApiSummaryShape(data) ? data : { rows: [], summary: [] };
-    const rows: Row[] = (payload.rows ?? []).map((r) => ({ ...r, source: file.name }));
-    const summary: Summary[] = payload.summary ?? summarizeClient(rows);
-    return { rows, summary };
+  if (!resp.ok) {
+    // 👉 Se è un index CMS, apri box URL con suggerimenti e segnala "handled"
+    if (isIndexDetected(body)) {
+  setIndexSuggestions((body as IndexDetected).suggestions ?? []);
+  setShowUrlBox(true);
+  throw makeHandled409Error();
+}
+if (isZipInnerRequired(body)) {
+  setPendingZipFile(file);
+  setZipInnerFiles((body as ZipInnerRequired).inner_files ?? []);
+  setShowUrlBox(true);
+  throw makeHandled409Error();
+}
+
+
+    const err = (isApiErrorShape(body) && ((body as ApiError).detail || (body as ApiError).message)) || "Upload error";
+    throw new Error(String(err));
   }
+
+  const payload: ApiSummaryResponse = isApiSummaryShape(body) ? (body as ApiSummaryResponse) : { rows: [], summary: [] };
+  const rows: Row[] = (payload.rows ?? []).map((r) => ({ ...r, source: file.name }));
+  const summary: Summary[] = payload.summary ?? summarizeClient(rows);
+  return { rows, summary };
+}
+
 
   async function onUploadInputChange(e: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
@@ -444,22 +565,43 @@ function onPdfLogoChange(e: ChangeEvent<HTMLInputElement>) {
     setError(null);
     setProgress(0);
     try {
-      const parts = await Promise.all(files.map(uploadOne));
-      const mergedRows = parts.flatMap((p) => p.rows);
-      setAllRows(mergedRows);
-      setAllSummary(summarizeClient(mergedRows));
-      setRows(mergedRows);
-      setSummary(summarizeClient(mergedRows));
-      setSource({ kind: "upload", name: `${files.length} files`, size: 0, type: "mixed" });
-      
-      setMeta({ source: `${files.length} file(s) uploaded`, fetched_at: new Date().toISOString(), index_month_hint: null });
-      try { localStorage.setItem(LS_SOURCE, JSON.stringify({ kind: "upload", value: `${files.length} files` })); } catch {}
+  // Elabora tutti i file ma non fallire se alcuni generano 409 "handled"
+  const results = await Promise.allSettled(files.map(uploadOne));
 
-    
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(msg);
-    } finally {
+  function isHandled409Error(e: unknown): e is Handled409Error {
+  return e instanceof Error && (e as Partial<Handled409Error>).handled409 === true;
+}
+
+  const ok = results.filter((r): r is PromiseFulfilledResult<{ rows: Row[]; summary: Summary[] }> => r.status === "fulfilled");
+  const handled409 = results.some(
+  (r) => r.status === "rejected" && isHandled409Error(r.reason)
+);
+
+const realErrors = results.filter(
+  (r) => r.status === "rejected" && !isHandled409Error(r.reason)
+) as PromiseRejectedResult[];
+
+
+  if (ok.length) {
+    const mergedRows = ok.flatMap((p) => p.value.rows);
+    const mergedSummary = summarizeClient(mergedRows);
+    setAllRows(mergedRows);
+    setAllSummary(mergedSummary);
+    setRows(mergedRows);
+    setSummary(mergedSummary);
+    setSource({ kind: "upload", name: `${files.length} files`, size: 0, type: "mixed" });
+    setMeta({ source: `${files.length} file(s) uploaded`, fetched_at: new Date().toISOString(), index_month_hint: null });
+    try { localStorage.setItem(LS_SOURCE, JSON.stringify({ kind: "upload", value: `${files.length} files` })); } catch {}
+  } else if (handled409) {
+    // Nessun dato caricato, ma abbiamo già mostrato suggerimenti/inner picker
+    // Non mostrare errore
+  } else if (realErrors.length) {
+    setError(String(realErrors[0].reason?.message || "Upload error"));
+  }
+} catch (err: unknown) {
+  const msg = err instanceof Error ? err.message : String(err);
+  setError(msg);
+} finally {
       setUploading(false);
       setProgress(0);
     }
@@ -474,6 +616,42 @@ function onPdfLogoChange(e: ChangeEvent<HTMLInputElement>) {
   function onDragOver(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
   }
+
+  async function analyzeZipInner(inner: string) {
+  if (!pendingZipFile) return;
+  setUploading(true);
+  setProgress(0);
+  setError(null);
+  try {
+    const form = new FormData();
+    form.append("file", pendingZipFile);
+    form.append("inner_name", inner);
+    form.append("include_rows", "true");
+
+    const resp = await fetch(`${API}/api/summary_upload`, { method: "POST", body: form });
+    const data: unknown = await resp.json();
+
+    if (!resp.ok) {
+      const msg = (isApiErrorShape(data) && (data.detail || data.message)) || `Upload error`;
+      throw new Error(String(msg));
+    }
+
+    const payload: ApiSummaryResponse = isApiSummaryShape(data) ? data : { rows: [], summary: [] };
+    resetTables(payload);
+    setSource({ kind: "upload", name: pendingZipFile.name, size: pendingZipFile.size, type: pendingZipFile.type });
+    setMeta(payload.meta ?? { source: pendingZipFile.name, fetched_at: new Date().toISOString(), index_month_hint: null });
+
+    // pulizia stato “scelta inner”
+    setZipInnerFiles([]);
+    setPendingZipFile(null);
+  } catch (e: unknown) {
+    setError(e instanceof Error ? e.message : String(e));
+  } finally {
+    setUploading(false);
+    setProgress(0);
+  }
+}
+
 
   /* ---------- Codes typeahead ---------- */
   const [codeChips, setCodeChips] = useState<CodeChip[]>([]);
@@ -1003,15 +1181,17 @@ try { localStorage.setItem(LS_SOURCE, JSON.stringify({ kind: "url", value: hrefO
                     Choose file
                   </Btn>
                   <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".csv,application/json,.json,text/csv"
-                    multiple
-                    onChange={onUploadInputChange}
-                    className="hidden"
-                    disabled={busy}
-                  />
-                  <div className="text-xs opacity-60">CSV / JSON only</div>
+  ref={fileInputRef}
+  type="file"
+  accept=".csv,.json,.gz,.zip,application/json,text/csv,application/gzip,application/zip"
+  multiple
+  onChange={onUploadInputChange}
+  className="hidden"
+  disabled={busy}
+/>
+
+                  <div className="text-xs opacity-60">CSV / JSON / GZ / ZIP only</div>
+
                 </div>
               </div>
 
@@ -1081,6 +1261,39 @@ try { localStorage.setItem(LS_SOURCE, JSON.stringify({ kind: "url", value: hrefO
     <SourceBadge />
   </div>
 
+  {/* ZIP inner selector - SEMPRE visibile se ci sono inner files */}
+{zipInnerFiles.length > 0 && (
+  <div className="space-y-2 rounded-lg border border-cyan-500/40 bg-cyan-500/10 p-3 mt-2">
+    <div className="text-sm font-medium">Pick a file inside the ZIP:</div>
+    <div className="flex flex-wrap gap-2">
+      {zipInnerFiles.map((n) => (
+        <Btn
+          key={n}
+          type="button"
+          kind="outline"
+          onClick={() => analyzeZipInner(n)}
+          className="text-xs"
+        >
+          {n}
+        </Btn>
+      ))}
+    </div>
+    <div className="pt-1">
+      <button
+        type="button"
+        onClick={() => {
+          setZipInnerFiles([]);
+          setPendingZipFile(null);
+        }}
+        className="text-xs underline opacity-80 hover:opacity-100"
+      >
+        Dismiss
+      </button>
+    </div>
+  </div>
+)}
+
+
   <Btn
     type="button"
     className="ml-auto"
@@ -1099,7 +1312,7 @@ try { localStorage.setItem(LS_SOURCE, JSON.stringify({ kind: "url", value: hrefO
                     className="w-full border rounded p-2 bg-white/5 border-white/10 text-slate-100 placeholder-slate-400"
                     value={url}
                     onChange={(e) => setUrl(e.target.value)}
-                    placeholder="CSV/JSON URL or local path (e.g., /data/sample_hospital_mrf.csv)"
+                    placeholder="CSV/JSON/GZ/ZIP URL or local path (e.g., /data/sample_hospital_mrf.csv)"
                   />
 
                   {indexSuggestions.length > 0 && (
@@ -1130,6 +1343,7 @@ try { localStorage.setItem(LS_SOURCE, JSON.stringify({ kind: "url", value: hrefO
                       </div>
                     </div>
                   )}
+
 
                   <div>
                     <Btn type="button" kind="primary" onClick={() => url && analyzeURL(url)} disabled={busy || !url}>
@@ -1354,6 +1568,13 @@ try { localStorage.setItem(LS_SOURCE, JSON.stringify({ kind: "url", value: hrefO
     <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
       <span className="opacity-70">Source:</span> <span className="font-medium">{meta.source}</span>
     </span>
+
+    {meta?.source_inner && (
+      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
+        <span className="opacity-70">Inner file:</span> {meta.source_inner}
+      </span>
+    )}
+
     {meta.fetched_at && (
       <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
         <span className="opacity-70">Last fetch:</span>{" "}

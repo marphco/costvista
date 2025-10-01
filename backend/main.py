@@ -1,11 +1,19 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form  # type: ignore
 from fastapi.middleware.cors import CORSMiddleware  # type: ignore
 from pydantic import BaseModel  # type: ignore
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 import csv, io, json, httpx, re  # type: ignore
 from datetime import datetime, timezone
 import re as _re
+import gzip, zipfile
+from contextvars import ContextVar
+
+ACCEPTED_INNER_EXTS = (".json", ".csv", ".ndjson", ".jsonl", ".txt", ".gz")
+MAX_DECOMPRESSED_BYTES = 200 * 1024 * 1024  # guardrail anti zip-bomb (~200MB)
+SOURCE_INNER: ContextVar[Optional[str]] = ContextVar("SOURCE_INNER", default=None)
+
+
 
 app = FastAPI(title="Costvista API")
 
@@ -31,19 +39,86 @@ def health():
     return {"ok": True}
 
 # ------------- Helpers ---------------
+def _text_from_zip_bytes(data: bytes) -> tuple[str, Optional[str]]:
+    """Ritorna (text, inner_name) dal contenuto ZIP in bytes.
+       Estrae il primo file 'utile'. Se è .gz, lo scompatta."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            # scegli il primo membro rilevante
+            candidates = [
+                n for n in zf.namelist()
+                if not n.endswith("/") and any(n.lower().endswith(ext) for ext in ACCEPTED_INNER_EXTS)
+            ]
+            if not candidates:
+                raise HTTPException(415, "ZIP does not contain a .json/.csv/.ndjson file.")
+            inner = candidates[0]
+            with zf.open(inner, "r") as f:
+                payload = f.read(MAX_DECOMPRESSED_BYTES + 1)
+            if len(payload) > MAX_DECOMPRESSED_BYTES:
+                raise HTTPException(413, "Decompressed ZIP content too large.")
+            # se l'interno è gz, scompatta
+            if inner.lower().endswith(".gz"):
+                try:
+                    payload = gzip.decompress(payload)
+                except Exception:
+                    raise HTTPException(400, "Inner GZ in ZIP is invalid.")
+            return payload.decode("utf-8", errors="replace"), inner
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(400, "Invalid ZIP file.")
+
+
 async def read_text(url_or_path: str) -> str:
-    """Legge un file remoto (http/https) o locale da ./public"""
+    """Legge file remoto (http/https) o locale ./public.
+       Supporta .gz e .zip; per .zip ritorna il testo del primo file utile."""
+    # reset info 'inner' per questa richiesta
+    SOURCE_INNER.set(None)
+
+    # ---- remoto ----
     if url_or_path.lower().startswith(("http://", "https://")):
         async with httpx.AsyncClient(timeout=120) as client:
             r = await client.get(url_or_path)
             r.raise_for_status()
+            url_l = url_or_path.lower()
+            content_enc = (r.headers.get("Content-Encoding") or "").lower()
+            content_type = (r.headers.get("Content-Type") or "").lower()
+
+            # URL o header indicano ZIP
+            if url_l.endswith(".zip") or "zip" in content_type:
+                text, inner = _text_from_zip_bytes(r.content)
+                SOURCE_INNER.set(inner)
+                return text
+
+            # URL .gz esplicito -> prova a gunzip, altrimenti usa r.text
+            if url_l.endswith(".gz"):
+                try:
+                    raw = gzip.decompress(r.content)
+                    return raw.decode("utf-8", errors="replace")
+                except Exception:
+                    return r.text
+
+            # altrimenti usa r.text (HTTPX di solito ha già gestito Content-Encoding)
             return r.text
+
+
+    # ---- locale (./public) ----
     rel = url_or_path.lstrip("/")
     base = Path(__file__).resolve().parent / "public"
     fp = base / rel
     if not fp.exists():
         raise HTTPException(404, f"Local file not found: {fp}")
+
+    p = rel.lower()
+    if p.endswith(".zip"):
+        text, inner = _text_from_zip_bytes(fp.read_bytes())
+        SOURCE_INNER.set(inner)
+        return text
+    if p.endswith(".gz"):
+        return gzip.decompress(fp.read_bytes()).decode("utf-8", errors="replace")
     return fp.read_text(encoding="utf-8")
+
+
 
 # --- CMS index detection (Cigna/BCBS/etc.) -----------------------------------
 from typing import Iterable
@@ -295,6 +370,29 @@ def _summarize(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     out.sort(key=lambda s: s["code"])
     return {"summary": out, "rows": rows, "count": len(rows)}
 
+# Estrai tutti i candidati utili da uno ZIP
+def _zip_candidates(data: bytes) -> list[zipfile.ZipInfo]:
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        infos = [m for m in zf.infolist()
+                 if not m.is_dir() and any(m.filename.lower().endswith(ext) for ext in ACCEPTED_INNER_EXTS)]
+    return infos
+
+def _read_inner_from_zip(data: bytes, inner_name: str) -> bytes:
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        try:
+            with zf.open(inner_name, "r") as f:
+                payload = f.read(MAX_DECOMPRESSED_BYTES + 1)
+        except KeyError:
+            raise HTTPException(404, f"Inner file not found in ZIP: {inner_name}")
+    if len(payload) > MAX_DECOMPRESSED_BYTES:
+        raise HTTPException(413, "Decompressed ZIP content too large.")
+    if inner_name.lower().endswith(".gz"):
+        try:
+            payload = gzip.decompress(payload)
+        except Exception:
+            raise HTTPException(400, "Inner GZ in ZIP is invalid.")
+    return payload
+
 # --------------- Schemi ---------------
 class ParseReq(BaseModel):
     url: str
@@ -309,66 +407,48 @@ class SummaryReq(BaseModel):
 @app.post("/api/parse")
 async def parse(req: ParseReq):
     text = await read_text(req.url)
+    inner = SOURCE_INNER.get()
 
-    if req.url.endswith(".csv") or ".csv" in req.url:
-        rows = parse_csv(text)
+    # --- parsing generalista + index-detection ---
+    try:
+        obj = json.loads(text)
+        suggestions = _extract_in_network_urls(obj)
+        if suggestions:
+            _raise_index_suggestions(suggestions)
+        rows = _find_first_array_of_objects(obj) or []
+        if not rows:
+            raise HTTPException(400, "Expected an array of objects or { data: [...] }.")
+    except json.JSONDecodeError:
+        rows = _find_first_array_of_objects(text) or []
+        if not rows:
+            rows = parse_csv(text)
 
-    elif req.url.endswith(".json") or ".json" in req.url:
-        try:
-            obj = json.loads(text)
-        except json.JSONDecodeError:
-            # NDJSON o stringa con righe JSON
-            rows = _find_first_array_of_objects(text) or []
-            if not rows:
-                raise HTTPException(400, "Invalid JSON.")
-        else:
-            # Riconosci “Table of Contents” CMS e proponi i file giusti
-            suggestions = _extract_in_network_urls(obj)
-            if suggestions:
-                    _raise_index_suggestions(suggestions)
-
-            rows = _find_first_array_of_objects(obj) or []
-            if not rows:
-                raise HTTPException(400, "Expected an array of objects or { data: [...] }.")
-
-    else:
-        raise HTTPException(400, "Unsupported file type. Use .csv or .json")
-
-    # Normalizzazione comune
+    # Normalizzazione + filtro
     rows = normalize_rows(rows)
-
     if req.codes and rows and isinstance(rows[0], dict):
         code_set = set(map(str, req.codes))
         rows = [r for r in rows if str(r.get("code")) in code_set]
 
-    return {"count": len(rows), "rows": rows}
+    return {"count": len(rows), "rows": rows, "meta": {"source": req.url, "source_inner": inner}}
 
 @app.post("/api/summary")
 async def summary(req: SummaryReq):
     text = await read_text(req.url)
+    inner = SOURCE_INNER.get()
 
-    if req.url.endswith(".csv") or ".csv" in req.url:
-        rows = parse_csv(text)
-
-    elif req.url.endswith(".json") or ".json" in req.url:
-        try:
-            obj = json.loads(text)
-        except json.JSONDecodeError:
-            rows = _find_first_array_of_objects(text) or []
-            if not rows:
-                raise HTTPException(400, "Invalid JSON.")
-        else:
-            # Riconosci gli index e proponi i link ai file con tariffe
-            suggestions = _extract_in_network_urls(obj)
-            if suggestions:
-                _raise_index_suggestions(suggestions)
-
-            rows = _find_first_array_of_objects(obj) or []
-            if not rows:
-                raise HTTPException(400, "Expected an array of objects or { data: [...] }.")
-
-    else:
-        raise HTTPException(400, "Unsupported file type. Use .csv or .json")
+    # --- parsing generalista + index-detection ---
+    try:
+        obj = json.loads(text)
+        suggestions = _extract_in_network_urls(obj)
+        if suggestions:
+            _raise_index_suggestions(suggestions)
+        rows = _find_first_array_of_objects(obj) or []
+        if not rows:
+            raise HTTPException(400, "Expected an array of objects or { data: [...] }.")
+    except json.JSONDecodeError:
+        rows = _find_first_array_of_objects(text) or []
+        if not rows:
+            rows = parse_csv(text)
 
     rows = normalize_rows(rows)
 
@@ -380,15 +460,25 @@ async def summary(req: SummaryReq):
     if not req.include_rows:
         res.pop("rows", None)
 
-    # ---- META (DENTRO la funzione) ----
-    meta = {
+    res["meta"] = {
         "source": req.url,
+        "source_inner": inner,
         "fetched_at": datetime.now(timezone.utc).isoformat(),
-        "index_month_hint": _infer_index_month(req.url),
+        "index_month_hint": _infer_index_month(req.url) or _infer_index_month(inner or ""),
         "include_rows": req.include_rows,
     }
-    res["meta"] = meta
     return res
+
+#     # ---- META (DENTRO la funzione) ----
+#     meta = {
+#     "source": req.url,
+#     "source_inner": inner,  # <-- nuovo
+#     "fetched_at": datetime.now(timezone.utc).isoformat(),
+#     "index_month_hint": _infer_index_month(req.url) or _infer_index_month(inner or ""),
+#     "include_rows": req.include_rows,
+# }
+#     res["meta"] = meta
+#     return res
 
 
 # -------- Upload (50MB) --------
@@ -413,43 +503,143 @@ def _find_first_array_of_objects(obj: Any) -> Optional[List[Dict[str, Any]]]:
             pass
     return None
 
+def _text_from_upload(filename: str, data: bytes) -> tuple[str, Optional[str]]:
+    """
+    Ritorna (text, inner_name).
+    - Se filename .gz -> gunzip.
+    - Se filename .zip -> estrae il primo file 'utile' (json/csv/ndjson/jsonl/txt o .gz),
+      con guardrail su dimensione decompressa. Se l'inner è .gz, lo scompatta.
+    - Altrimenti decodifica UTF-8.
+    """
+    name = (filename or "").lower()
+
+    # .gz "esterno"
+    if name.endswith(".gz"):
+        try:
+            raw = gzip.decompress(data)
+        except Exception:
+            raise HTTPException(400, "Invalid GZ file.")
+        return raw.decode("utf-8", errors="replace"), None
+
+    # .zip "esterno"
+    if name.endswith(".zip"):
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                # prendi il primo membro "utile"
+                candidates = [
+                    n for n in zf.namelist()
+                    if not n.endswith("/") and any(n.lower().endswith(ext) for ext in ACCEPTED_INNER_EXTS)
+                ]
+                if not candidates:
+                    raise HTTPException(415, "ZIP does not contain a .json/.csv/.ndjson file.")
+                inner = candidates[0]
+                with zf.open(inner, "r") as f:
+                    payload = f.read(MAX_DECOMPRESSED_BYTES + 1)
+                if len(payload) > MAX_DECOMPRESSED_BYTES:
+                    raise HTTPException(413, "Decompressed ZIP content too large.")
+                # Se l'interno è a sua volta .gz, scompatta
+                if inner.lower().endswith(".gz"):
+                    try:
+                        payload = gzip.decompress(payload)
+                    except Exception:
+                        raise HTTPException(400, "Inner GZ in ZIP is invalid.")
+                return payload.decode("utf-8", errors="replace"), inner
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(400, "Invalid ZIP file.")
+
+    # fallback: file testo "normale"
+    return data.decode("utf-8", errors="replace"), None
+
+def _text_from_upload_with_choice(filename: str, data: bytes, inner_name: Optional[str]) -> Tuple[str, Optional[str], Optional[list[str]]]:
+    """
+    Ritorna (text, chosen_inner, inner_list_if_multiple)
+    - Se .zip e inner_name è fornito -> apre quello
+    - Se .zip e più candidati ma inner_name mancante -> non legge nulla e ritorna la lista
+    - Altri formati come prima
+    """
+    name = (filename or "").lower()
+
+    # .gz esterno
+    if name.endswith(".gz"):
+        try:
+            raw = gzip.decompress(data)
+        except Exception:
+            raise HTTPException(400, "Invalid GZ file.")
+        return raw.decode("utf-8", errors="replace"), None, None
+
+    # .zip esterno
+    if name.endswith(".zip"):
+        try:
+            candidates = _zip_candidates(data)
+            if not candidates:
+                raise HTTPException(415, "ZIP does not contain a .json/.csv/.ndjson file.")
+            # se inner_name non c'è e ci sono molte opzioni -> chiedi scelta
+            if inner_name is None and len(candidates) > 1:
+                return "", None, [c.filename for c in candidates]
+            # se inner_name mancante ma 1 candidato, usa quello
+            chosen = inner_name or candidates[0].filename
+            payload = _read_inner_from_zip(data, chosen)
+            return payload.decode("utf-8", errors="replace"), chosen, None
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(400, "Invalid ZIP file.")
+
+    # flat text
+    return data.decode("utf-8", errors="replace"), None, None
+
+
 @app.post("/api/summary_upload")
 async def summary_upload(
     file: UploadFile = File(...),
     codes: List[str] = Form(default=[]),
     include_rows: bool = Form(default=True),
+    inner_name: Optional[str] = Form(default=None),   # <-- NOVITÀ
 ):
+    # -- lettura a chunk come prima --
     total = 0
     chunks: List[bytes] = []
     while True:
-        chunk = await file.read(1024 * 1024)  # 1MB
+        chunk = await file.read(1024 * 1024)
         if not chunk:
             break
         total += len(chunk)
         if total > MAX_SIZE_BYTES:
-            raise HTTPException(413, "File too large (limit 50MB).")
+            raise HTTPException(413, "File too large (limit 50MB). For larger files use streaming mode.")
         chunks.append(chunk)
-
     data = b"".join(chunks)
-    text = data.decode("utf-8", errors="replace")
 
-    # 1) prova JSON puro
+    # ► nuovo: normalizza testo tenendo conto di inner_name e molteplici candidati ZIP
+    text, chosen_inner, inner_list = _text_from_upload_with_choice(getattr(file, "filename", ""), data, inner_name)
+
+    # se ci sono più candidati e non hanno scelto -> ritorna 409 + lista
+    if inner_list is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "zip_inner_required",
+                "message": "This ZIP contains multiple files. Pick one.",
+                "inner_files": inner_list[:50],  # safety
+            },
+        )
+
+    # --- parsing generalista + index-detection come prima ---
     rows: List[Dict[str, Any]] = []
     try:
         obj = json.loads(text)
+        suggestions = _extract_in_network_urls(obj)
+        if suggestions:
+            _raise_index_suggestions(suggestions)  # 409 + suggestions (URL)
     except json.JSONDecodeError:
-        # 2) NDJSON
         rows = _find_first_array_of_objects(text) or []
         if not rows:
-            # 3) CSV (auto-detect)
             rows = parse_csv(text)
     else:
         rows = _find_first_array_of_objects(obj) or []
         if not rows:
-            raise HTTPException(
-                400,
-                "Expected an array, { data: [...] }, any object with a first array of objects, or NDJSON."
-            )
+            raise HTTPException(400, "Expected an array, { data: [...] }, any object with a first array of objects, or NDJSON.")
 
     rows = normalize_rows(rows)
 
@@ -466,12 +656,11 @@ async def summary_upload(
     if not include_rows:
         res.pop("rows", None)
 
-    # ---- META (DENTRO la funzione) ----
-    meta = {
+    res["meta"] = {
         "source": getattr(file, "filename", "upload"),
+        "source_inner": chosen_inner,  # <-- se ZIP
         "fetched_at": datetime.now(timezone.utc).isoformat(),
-        "index_month_hint": _infer_index_month(getattr(file, "filename", "")),
+        "index_month_hint": _infer_index_month(getattr(file, "filename", "")) or _infer_index_month(chosen_inner or ""),
         "include_rows": include_rows,
     }
-    res["meta"] = meta
     return res
