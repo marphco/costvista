@@ -295,25 +295,35 @@ export default function DemoPage() {
   const [pdfHeader, setPdfHeader] = useState<string>("");
 const [pdfLogo, setPdfLogo] = useState<string | null>(null);
 
+const LS = {
+  header: "cv.pdf.header",
+  logo: "cv.pdf.logo",
+};
+
 useEffect(() => {
-  // load
-  const h = localStorage.getItem("cv_pdf_header");
-  const l = localStorage.getItem("cv_pdf_logo");
-  if (h) setPdfHeader(h);
-  if (l) setPdfLogo(l);
+  try {
+    const h = localStorage.getItem(LS.header);
+    const l = localStorage.getItem(LS.logo);
+    if (h) setPdfHeader(h);
+    if (l) setPdfLogo(l);
+  } catch { /* no-op */ }
+// eslint-disable-next-line react-hooks/exhaustive-deps
 }, []);
 
 useEffect(() => {
-  localStorage.setItem("cv_pdf_header", pdfHeader || "");
-}, [pdfHeader]);
+  try {
+    if (pdfHeader?.trim()) localStorage.setItem(LS.header, pdfHeader.trim());
+    else localStorage.removeItem(LS.header);
 
-useEffect(() => {
-  if (pdfLogo) localStorage.setItem("cv_pdf_logo", pdfLogo);
-  else localStorage.removeItem("cv_pdf_logo");
-}, [pdfLogo]);
+    if (pdfLogo) localStorage.setItem(LS.logo, pdfLogo);
+    else localStorage.removeItem(LS.logo);
+  } catch { /* no-op */ }
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, [pdfHeader, pdfLogo]);
 
 function clearLogo() {
   setPdfLogo(null);
+  try { localStorage.removeItem(LS.logo); } catch {}
 }
 
 function onPdfLogoChange(e: ChangeEvent<HTMLInputElement>) {
