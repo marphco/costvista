@@ -332,6 +332,10 @@ const [pdfLogo, setPdfLogo] = useState<string | null>(null);
 const [zipInnerFiles, setZipInnerFiles] = useState<string[]>([]);
 const [pendingZipFile, setPendingZipFile] = useState<File | null>(null);
 
+// tray visibilità suggerimenti (fuori da URL advanced)
+const [showIndexTray, setShowIndexTray] = useState<boolean>(false);
+
+
 const LS = {
   header: "cv.pdf.header",
   logo: "cv.pdf.logo",
@@ -406,6 +410,7 @@ function handleUploadResponse(status: number, data: unknown, file?: File) {
   // Caso A: Index CMS
   if (isIndexDetected(data)) {
     setIndexSuggestions(data.suggestions ?? []);
+    setShowIndexTray(true);
     setShowUrlBox(true);
     return { handled: true };
   }
@@ -464,6 +469,7 @@ if (!/(csv|json|gz|zip)$/i.test(file.name)) {
     if (xhr.status === 409) {
       if (isIndexDetected(body)) {
         setIndexSuggestions((body as IndexDetected).suggestions ?? []);
+        setShowIndexTray(true);
         setShowUrlBox(true);
         setUploadErr(null);
         setUploading(false);
@@ -497,6 +503,7 @@ if (!/(csv|json|gz|zip)$/i.test(file.name)) {
     const u = body;
     if (isIndexDetected(u) && Array.isArray(u.suggestions) && u.suggestions.length) {
       setIndexSuggestions(u.suggestions);
+      setShowIndexTray(true);
       setShowUrlBox(true);
       setUploadErr(null);
     } else if (isZipInnerRequired(u) && Array.isArray(u.inner_files) && u.inner_files.length) {
@@ -535,6 +542,7 @@ if (!/(csv|json|gz|zip)$/i.test(file.name)) {
     // 👉 Se è un index CMS, apri box URL con suggerimenti e segnala "handled"
     if (isIndexDetected(body)) {
   setIndexSuggestions((body as IndexDetected).suggestions ?? []);
+  setShowIndexTray(true);
   setShowUrlBox(true);
   throw makeHandled409Error();
 }
@@ -609,13 +617,15 @@ const realErrors = results.filter(
 
   // Drag & drop (usa upload singolo; il file input gestisce il multi)
   function onDrop(e: DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    const f = e.dataTransfer.files?.[0];
-    if (f) handleFileUpload(f);
-  }
-  function onDragOver(e: DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-  }
+  e.preventDefault();
+  if (busy) return;              // ⬅️ blocca durante busy
+  const f = e.dataTransfer.files?.[0];
+  if (f) handleFileUpload(f);
+}
+function onDragOver(e: DragEvent<HTMLDivElement>) {
+  e.preventDefault();
+  if (busy) return;              // ⬅️ niente highlight/azione durante busy
+}
 
   async function analyzeZipInner(inner: string) {
   if (!pendingZipFile) return;
@@ -662,6 +672,10 @@ const realErrors = results.filter(
   const inputRef = useRef<HTMLInputElement>(null);
   const [catalog] = useState(COMMON_CPT);
   const [meta, setMeta] = useState<Meta | null>(null);
+
+const currentReq = useRef<AbortController | null>(null);     // per abort dei fetch in corsa
+const [pickedIndexUrl, setPickedIndexUrl] = useState<string | null>(null); // ultimo suggerimento scelto
+
 
   const [debouncedQ, setDebouncedQ] = useState("");
   useEffect(() => {
@@ -827,82 +841,107 @@ useEffect(() => {
   const [showUrlBox, setShowUrlBox] = useState(false);
   const [url, setUrl] = useState("");
 
-  async function analyzeURL(hrefOrLocalPath: string) {
-    if (isDemoPath(hrefOrLocalPath)) {
-  if (hrefOrLocalPath.endsWith("sample_hospital_mrf.csv")) setActivePreset("A");
-  else if (hrefOrLocalPath.endsWith("sample_hospital_mrf_plan_b.csv")) setActivePreset("B");
-  else if (hrefOrLocalPath.endsWith("sample_hospital_mrf_plan_c.json")) setActivePreset("C");
-} else {
-  setActivePreset(null);
-}
+  async function analyzeURL(hrefOrLocalPath: string, opts: { fromIndex?: boolean } = {})
+ {
+  // preset attivi
+  if (isDemoPath(hrefOrLocalPath)) {
+    if (hrefOrLocalPath.endsWith("sample_hospital_mrf.csv")) setActivePreset("A");
+    else if (hrefOrLocalPath.endsWith("sample_hospital_mrf_plan_b.csv")) setActivePreset("B");
+    else if (hrefOrLocalPath.endsWith("sample_hospital_mrf_plan_c.json")) setActivePreset("C");
+  } else {
+    setActivePreset(null);
+  }
 
+  // se arriva da lista “index”, memorizza scelta
+  if (opts.fromIndex) setPickedIndexUrl(hrefOrLocalPath);
 
-    setLoading(true);
-    setError(null);
-    setRows([]);
-    setSummary([]);
-    setProgress(0);
+  // aborta qualsiasi richiesta precedente
+  currentReq.current?.abort();
+  const ctrl = new AbortController();
+  currentReq.current = ctrl;
+
+  setLoading(true);
+  setError(null);
+  setRows([]);
+  setSummary([]);
+  setProgress(0);
+
+  try {
+    const resp = await fetch(`${API}/api/summary`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: hrefOrLocalPath, include_rows: true }),
+      signal: ctrl.signal,
+    });
+
+    const raw: unknown = await resp.json().catch(() => ({} as unknown));
+    const body: unknown = hasDetail(raw) ? (raw as { detail: unknown }).detail : raw;
+
+    if (!resp.ok) {
+      const maybeErr = body as ApiError;
+      if (
+        typeof maybeErr === "object" &&
+        maybeErr !== null &&
+        maybeErr.error === "index_detected" &&
+        Array.isArray(maybeErr.suggestions) &&
+        maybeErr.suggestions.length > 0
+      ) {
+        setIndexSuggestions(maybeErr.suggestions);
+        setShowIndexTray(true);
+        setShowUrlBox(true);
+        setError(null);
+        setRows([]);
+        setSummary([]);
+        setProgress(0);
+        return;
+      }
+      const msg =
+        (isApiErrorShape(body) && (body.detail || body.message)) ||
+        (isApiErrorShape(raw) && (raw.detail || raw.message)) ||
+        `HTTP ${resp.status}`;
+      throw new Error(String(msg));
+    }
+
+    let payload: ApiSummaryResponse;
+    if (isApiSummaryShape(raw)) {
+      payload = raw as ApiSummaryResponse;
+    } else if (hasDetail(raw) && isApiSummaryShape((raw as { detail: unknown }).detail)) {
+      payload = (raw as { detail: ApiSummaryResponse }).detail;
+    } else {
+      payload = { rows: [], summary: [] };
+    }
+
+    resetTables(payload);
+
+    // ✅ mostra sempre la source (l’URL scelto) e, se presente dal backend, l’inner file
+    setMeta(
+      payload.meta ?? {
+        source: hrefOrLocalPath,
+        fetched_at: new Date().toISOString(),
+        index_month_hint: null,
+      }
+    );
+
+    // ✅ aggiorna il badge sorgente
+    setSource({ kind: "url", href: hrefOrLocalPath });
 
     try {
-      const resp = await fetch(`${API}/api/summary`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: hrefOrLocalPath, include_rows: true }),
-      });
+      localStorage.setItem(LS_SOURCE, JSON.stringify({ kind: "url", value: hrefOrLocalPath }));
+    } catch {}
 
-      const raw: unknown = await resp.json().catch(() => ({} as unknown));
-      const body: unknown = hasDetail(raw) ? raw.detail : raw;
-
-      if (!resp.ok) {
-        // 409 da backend: index CMS con suggerimenti
-        const maybeErr = body as ApiError;
-        if (
-          typeof maybeErr === "object" &&
-          maybeErr !== null &&
-          (maybeErr as ApiError).error === "index_detected" &&
-          Array.isArray((maybeErr as ApiError).suggestions) &&
-          (maybeErr as ApiError).suggestions!.length > 0
-        ) {
-          setIndexSuggestions((maybeErr as ApiError).suggestions as string[]);
-          setShowUrlBox(true);
-          setError(null);
-          setRows([]);
-          setSummary([]);
-          setProgress(0);
-          return;
-        }
-
-        const msg =
-          (isApiErrorShape(body) && (body.detail || body.message)) ||
-          (isApiErrorShape(raw) && (raw.detail || raw.message)) ||
-          `HTTP ${resp.status}`;
-        throw new Error(String(msg));
-      }
-
-      let payload: ApiSummaryResponse;
-if (isApiSummaryShape(raw)) {
-  payload = raw as ApiSummaryResponse;
-} else if (hasDetail(raw) && isApiSummaryShape((raw as { detail: unknown }).detail)) {
-  payload = (raw as { detail: ApiSummaryResponse }).detail;
-} else {
-  payload = { rows: [], summary: [] };
-}
-resetTables(payload);
-setMeta(payload.meta ?? { source: hrefOrLocalPath, fetched_at: new Date().toISOString(), index_month_hint: null });
-try { localStorage.setItem(LS_SOURCE, JSON.stringify({ kind: "url", value: hrefOrLocalPath })); } catch {}
-
-
-      setIndexSuggestions([]);
-      setProgress(100);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(msg);
-      setSource(null);
-    } finally {
-      setLoading(false);
-      setTimeout(() => setProgress(0), 600);
-    }
+    setProgress(100);
+  } catch (err) {
+    // ignoriamo abort come errore visuale
+    if ((err as { name?: string } | null)?.name === "AbortError") return;
+    const msg = err instanceof Error ? err.message : String(err);
+    setError(msg);
+    setSource(null);
+  } finally {
+    setLoading(false);
+    setTimeout(() => setProgress(0), 600);
   }
+}
+
 
   async function analyzeManyURLs(paths: DemoPath[]) {
     setLoading(true);
@@ -1172,7 +1211,7 @@ try { localStorage.setItem(LS_SOURCE, JSON.stringify({ kind: "url", value: hrefO
               <div
                 onDrop={onDrop}
                 onDragOver={onDragOver}
-                className="rounded-xl border border-dashed border-white/20 p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-black/30"
+                className={`rounded-xl border border-dashed border-white/20 p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-black/30 ${busy ? "opacity-70 cursor-not-allowed" : ""}`}
               >
                 <div className="text-sm text-slate-300">Drag & drop a CSV or JSON (max 50MB), or</div>
 
@@ -1259,6 +1298,16 @@ try { localStorage.setItem(LS_SOURCE, JSON.stringify({ kind: "url", value: hrefO
 
   <div className="ml-2">
     <SourceBadge />
+    {indexSuggestions.length > 0 && !showIndexTray && (
+  <button
+    type="button"
+    onClick={() => setShowIndexTray(true)}
+    className="text-xs rounded-full bg-yellow-500/10 border border-yellow-500/30 px-2 py-1"
+    title="Show CMS index suggestions"
+  >
+    Show suggestions ({indexSuggestions.length})
+  </button>
+)}
   </div>
 
   {/* ZIP inner selector - SEMPRE visibile se ci sono inner files */}
@@ -1306,6 +1355,9 @@ try { localStorage.setItem(LS_SOURCE, JSON.stringify({ kind: "url", value: hrefO
 </div>
 
 
+
+
+
               {showUrlBox && (
                 <div className="flex flex-col gap-2 mt-3">
                   <input
@@ -1315,34 +1367,8 @@ try { localStorage.setItem(LS_SOURCE, JSON.stringify({ kind: "url", value: hrefO
                     placeholder="CSV/JSON/GZ/ZIP URL or local path (e.g., /data/sample_hospital_mrf.csv)"
                   />
 
-                  {indexSuggestions.length > 0 && (
-                    <div className="space-y-2 rounded-lg border border-yellow-500/40 bg-yellow-500/10 p-3">
-                      <div className="text-sm font-medium">This looks like a CMS index. Pick an in-network file:</div>
-                      <div className="flex flex-wrap gap-2">
-                        {indexSuggestions.map((u, i) => (
-                          <Btn
-                            key={u + i}
-                            type="button"
-                            kind="outline"
-                            onClick={() => analyzeURL(u)}
-                            className="text-xs truncate max-w-full"
-                            title={u}
-                          >
-                            {u}
-                          </Btn>
-                        ))}
-                      </div>
-                      <div className="pt-1">
-                        <button
-                          type="button"
-                          onClick={() => setIndexSuggestions([])}
-                          className="text-xs underline opacity-80 hover:opacity-100"
-                        >
-                          Dismiss suggestions
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                  
+
 
 
                   <div>
@@ -1353,6 +1379,60 @@ try { localStorage.setItem(LS_SOURCE, JSON.stringify({ kind: "url", value: hrefO
                 </div>
               )}
             </CardShell>
+
+{/* --- Index suggestions tray (sempre fuori dall'advanced) --- */}
+{indexSuggestions.length > 0 && (
+  <div
+    className="mt-3 rounded-lg border border-yellow-500/30 bg-yellow-500/5"
+    aria-busy={busy}
+  >
+    <div className="flex items-center justify-between px-3 py-2">
+      <div className="text-xs text-yellow-200/90">
+        CMS index detected — suggestions: <span className="font-medium">{indexSuggestions.length}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <Btn
+          type="button"
+          kind="outline"
+          onClick={() => setShowIndexTray(v => !v)}
+          className="text-xs"
+        >
+          {showIndexTray ? "Hide suggestions" : "Show suggestions"}
+        </Btn>
+        {/* opzionale: pulizia esplicita se proprio serve */}
+        {/* <Btn type="button" kind="ghost" onClick={() => { setIndexSuggestions([]); setPickedIndexUrl(null); }} className="text-xs">Clear</Btn> */}
+      </div>
+    </div>
+
+    {showIndexTray && (
+      <div className="px-3 pb-3">
+        <div className="flex flex-wrap gap-2">
+          {indexSuggestions.map((u, i) => (
+            <Btn
+              key={u + i}
+              type="button"
+              kind="outline"
+              onClick={() => analyzeURL(u, { fromIndex: true /* non serve preserveIndexList */ })}
+              className={`text-xs truncate max-w-full ${busy ? "pointer-events-none opacity-50" : ""}`}
+              title={u}
+              disabled={busy}
+              aria-disabled={busy}
+            >
+              {u}
+            </Btn>
+          ))}
+        </div>
+
+        {pickedIndexUrl && (
+          <div className="text-[11px] opacity-75 mt-2">
+            Picked: <span className="font-mono">{pickedIndexUrl}</span>
+          </div>
+        )}
+      </div>
+    )}
+  </div>
+)}
+
           </section>
 
           {/* Codes typeahead & actions */}
