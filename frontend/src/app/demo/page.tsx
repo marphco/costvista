@@ -302,6 +302,34 @@ const LS = {
 
 const LS_FILTERS = "cv.filters";
 
+const LS_SOURCE = "cv.source";
+
+useEffect(() => {
+  try {
+    const raw = localStorage.getItem(LS_SOURCE);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+
+    if (parsed.kind === "url" && typeof parsed.value === "string") {
+      analyzeURL(parsed.value);
+    } else if (parsed.kind === "demo" && parsed.value === "COMPARE") {
+      analyzeManyURLs([
+        "/data/sample_hospital_mrf.csv",
+        "/data/sample_hospital_mrf_plan_b.csv",
+        "/data/sample_hospital_mrf_plan_c.json",
+      ]);
+    } else if (parsed.kind === "demo") {
+      // fallback: carica A di default
+      analyzeURL("/data/sample_hospital_mrf.csv");
+    }
+    // NB: upload non si può ricaricare (per limiti browser), quindi saltiamo
+  } catch {
+    /* no-op */
+  }
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
+
+
 useEffect(() => {
   try {
     const h = localStorage.getItem(LS.header);
@@ -425,6 +453,8 @@ function onPdfLogoChange(e: ChangeEvent<HTMLInputElement>) {
       setSource({ kind: "upload", name: `${files.length} files`, size: 0, type: "mixed" });
       
       setMeta({ source: `${files.length} file(s) uploaded`, fetched_at: new Date().toISOString(), index_month_hint: null });
+      try { localStorage.setItem(LS_SOURCE, JSON.stringify({ kind: "upload", value: `${files.length} files` })); } catch {}
+
     
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -600,6 +630,7 @@ useEffect(() => {
     setIndexSuggestions([]);
     setActivePreset(null);
     try { localStorage.removeItem(LS_FILTERS); } catch {}
+    try { localStorage.removeItem(LS_SOURCE); } catch {}
   }
 
   useEffect(() => {
@@ -680,6 +711,8 @@ if (isApiSummaryShape(raw)) {
 }
 resetTables(payload);
 setMeta(payload.meta ?? { source: hrefOrLocalPath, fetched_at: new Date().toISOString(), index_month_hint: null });
+try { localStorage.setItem(LS_SOURCE, JSON.stringify({ kind: "url", value: hrefOrLocalPath })); } catch {}
+
 
       setIndexSuggestions([]);
       setProgress(100);
@@ -728,6 +761,8 @@ setMeta(payload.meta ?? { source: hrefOrLocalPath, fetched_at: new Date().toISOS
       
       setSource({ kind: "demo", path: paths[0] });
       setMeta({ source: "Compare A + B + C", fetched_at: new Date().toISOString(), index_month_hint: null });
+      try { localStorage.setItem(LS_SOURCE, JSON.stringify({ kind: "demo", value: "COMPARE" })); } catch {}
+
       
       setProgress(100);
     } catch (e: unknown) {
