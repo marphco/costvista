@@ -507,6 +507,7 @@ function onPdfLogoChange(e: ChangeEvent<HTMLInputElement>) {
   const [summary, setSummary] = useState<Summary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const busy = loading || uploading || progress > 0;
 
   /* ---------- Filters & sorting ---------- */
   const [rowCodeQ, setRowCodeQ] = useState("");
@@ -905,7 +906,7 @@ setMeta(payload.meta ?? { source: hrefOrLocalPath, fetched_at: new Date().toISOS
 
   return (
     <MotionConfig reducedMotion="user">
-      <main className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-black text-slate-100">
+      <main className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-black text-slate-100" aria-busy={busy}>
         {Header}
 
         <div className="max-w-6xl mx-auto p-6 space-y-6">
@@ -925,7 +926,7 @@ setMeta(payload.meta ?? { source: hrefOrLocalPath, fetched_at: new Date().toISOS
                 <div className="text-sm text-slate-300">Drag & drop a CSV or JSON (max 50MB), or</div>
 
                 <div className="flex items-center gap-3">
-                  <Btn kind="primary" type="button" onClick={() => fileInputRef.current?.click()}>
+                  <Btn kind="primary" type="button" onClick={() => fileInputRef.current?.click()} disabled={busy}>
                     Choose file
                   </Btn>
                   <input
@@ -935,6 +936,7 @@ setMeta(payload.meta ?? { source: hrefOrLocalPath, fetched_at: new Date().toISOS
                     multiple
                     onChange={onUploadInputChange}
                     className="hidden"
+                    disabled={busy}
                   />
                   <div className="text-xs opacity-60">CSV / JSON only</div>
                 </div>
@@ -960,6 +962,7 @@ setMeta(payload.meta ?? { source: hrefOrLocalPath, fetched_at: new Date().toISOS
     kind="secondary"
     active={activePreset === "A"}
     onClick={() => analyzeURL("/data/sample_hospital_mrf.csv")}
+    disabled={busy}
   >
     Demo A (CSV)
   </Btn>
@@ -969,6 +972,7 @@ setMeta(payload.meta ?? { source: hrefOrLocalPath, fetched_at: new Date().toISOS
     kind="secondary"
     active={activePreset === "B"}
     onClick={() => analyzeURL("/data/sample_hospital_mrf_plan_b.csv")}
+    disabled={busy}
   >
     Demo B (CSV)
   </Btn>
@@ -978,6 +982,7 @@ setMeta(payload.meta ?? { source: hrefOrLocalPath, fetched_at: new Date().toISOS
     kind="secondary"
     active={activePreset === "C"}
     onClick={() => analyzeURL("/data/sample_hospital_mrf_plan_c.json")}
+    disabled={busy}
   >
     Demo C (JSON)
   </Btn>
@@ -992,7 +997,9 @@ setMeta(payload.meta ?? { source: hrefOrLocalPath, fetched_at: new Date().toISOS
         "/data/sample_hospital_mrf_plan_b.csv",
         "/data/sample_hospital_mrf_plan_c.json",
       ])
+      
     }
+    disabled={busy}
   >
     Compare A + B + C
   </Btn>
@@ -1006,6 +1013,7 @@ setMeta(payload.meta ?? { source: hrefOrLocalPath, fetched_at: new Date().toISOS
     className="ml-auto"
     kind="outline"
     onClick={() => setShowUrlBox((v) => !v)}
+    disabled={busy}
   >
     {showUrlBox ? "Hide URL (advanced)" : "Show URL (advanced)"}
   </Btn>
@@ -1051,7 +1059,7 @@ setMeta(payload.meta ?? { source: hrefOrLocalPath, fetched_at: new Date().toISOS
                   )}
 
                   <div>
-                    <Btn type="button" kind="primary" onClick={() => url && analyzeURL(url)}>
+                    <Btn type="button" kind="primary" onClick={() => url && analyzeURL(url)} disabled={busy || !url}>
                       Analyze
                     </Btn>
                   </div>
@@ -1071,6 +1079,7 @@ setMeta(payload.meta ?? { source: hrefOrLocalPath, fetched_at: new Date().toISOS
                 setIsOpen(true);
                 setHighlightIdx(0);
               }}
+              disabled={busy}
               onFocus={() => setIsOpen(!!procQuery)}
               onKeyDown={onKeyDown}
               placeholder="Search by code or description (e.g., MRI, 70551)…"
@@ -1132,15 +1141,15 @@ setMeta(payload.meta ?? { source: hrefOrLocalPath, fetched_at: new Date().toISOS
 
       <div className="flex flex-wrap gap-2">
        <div className="flex flex-wrap items-center gap-2">
-  <Btn type="button" kind="outline" onClick={exportRowsCSV} disabled={!filteredSortedRows.length}>
+  <Btn type="button" kind="outline" onClick={exportRowsCSV} disabled={busy || !filteredSortedRows.length}>
     Export rows CSV
   </Btn>
 
-  <Btn type="button" kind="outline" onClick={exportSummaryCSV} disabled={!filteredSortedSummary.length}>
+  <Btn type="button" kind="outline" onClick={exportSummaryCSV} disabled={busy || !filteredSortedRows.length}>
     Export summary CSV
   </Btn>
 
-  <Btn type="button" kind="outline" onClick={exportSummaryPDF} disabled={!filteredSortedSummary.length}>
+  <Btn type="button" kind="outline" onClick={exportSummaryPDF} disabled={busy || !filteredSortedRows.length}>
     Export summary PDF
   </Btn>
 
@@ -1150,7 +1159,7 @@ setMeta(payload.meta ?? { source: hrefOrLocalPath, fetched_at: new Date().toISOS
     onClick={() => {
       if (window.confirm("Clear all loaded data and filters?")) clearResults();
     }}
-    disabled={!allRows.length}
+    disabled={busy || !allRows.length}
     className="ml-auto"
     title="Remove all loaded data"
   >
@@ -1241,6 +1250,8 @@ setMeta(payload.meta ?? { source: hrefOrLocalPath, fetched_at: new Date().toISOS
               animate="animate"
               transition={{ duration: 0.3 }}
               className="opacity-80 text-sm"
+              role="status"
+              aria-live="polite"
             >
               Analyzing…
             </motion.p>
