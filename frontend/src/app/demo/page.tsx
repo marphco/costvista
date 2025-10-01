@@ -300,6 +300,8 @@ const LS = {
   logo: "cv.pdf.logo",
 };
 
+const LS_FILTERS = "cv.filters";
+
 useEffect(() => {
   try {
     const h = localStorage.getItem(LS.header);
@@ -521,6 +523,41 @@ function onPdfLogoChange(e: ChangeEvent<HTMLInputElement>) {
   const [sumSortKey, setSumSortKey] = useState<keyof Summary>("median");
   const [sumSortDir, setSumSortDir] = useState<Dir>("asc");
 
+  // Load filters from localStorage
+useEffect(() => {
+  try {
+    const raw = localStorage.getItem(LS_FILTERS);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+
+    if (Array.isArray(parsed.codeChips)) setCodeChips(parsed.codeChips);
+    if (typeof parsed.procQuery === "string") setProcQuery(parsed.procQuery);
+    if (parsed.rowSortKey) setRowSortKey(parsed.rowSortKey);
+    if (parsed.rowSortDir) setRowSortDir(parsed.rowSortDir);
+    if (parsed.sumSortKey) setSumSortKey(parsed.sumSortKey);
+    if (parsed.sumSortDir) setSumSortDir(parsed.sumSortDir);
+  } catch {
+    /* no-op */
+  }
+}, []);
+
+// Save filters to localStorage
+useEffect(() => {
+  try {
+    const data = {
+      codeChips,
+      procQuery,
+      rowSortKey,
+      rowSortDir,
+      sumSortKey,
+      sumSortDir,
+    };
+    localStorage.setItem(LS_FILTERS, JSON.stringify(data));
+  } catch {
+    /* no-op */
+  }
+}, [codeChips, procQuery, rowSortKey, rowSortDir, sumSortKey, sumSortDir]);
+
   function resetTables(payload: { rows?: Row[]; summary?: Summary[] }) {
     const rs = (payload.rows ?? []) as Row[];
     const sm = (payload.summary ?? []) as Summary[];
@@ -562,6 +599,7 @@ function onPdfLogoChange(e: ChangeEvent<HTMLInputElement>) {
     setDebouncedQ("");
     setIndexSuggestions([]);
     setActivePreset(null);
+    try { localStorage.removeItem(LS_FILTERS); } catch {}
   }
 
   useEffect(() => {
