@@ -239,7 +239,8 @@ function Btn({
   active?: boolean;
 }) {
   const base =
-    "h-9 px-3 rounded-lg text-sm transition inline-flex items-center justify-center " +
+    "h-8 px-2.5 rounded-md text-[13px] transition " +
+    "inline-flex items-center justify-center cursor-pointer " +
     "ring-1 ring-inset focus:outline-none focus:ring-2 focus:ring-sky-400/60 " +
     "disabled:opacity-40 disabled:pointer-events-none";
 
@@ -251,18 +252,15 @@ function Btn({
     ghost: "bg-transparent text-slate-300 hover:bg-white/10 ring-transparent",
   };
 
-  // se `active` forziamo l’aspetto “primary” (usato per i preset demo selezionati)
   const resolved =
     active && kind !== "danger" && kind !== "ghost" ? variants.primary : variants[kind];
 
   return (
-    <button {...props} className={`${base} ${resolved} ${className}`} aria-pressed={active}>
+    <button {...props} className={`${base} ${resolved} ${className}`}>
       {children}
     </button>
   );
 }
-
-
 
 function CardShell({ title, children }: { title?: string; children: ReactNode }) {
   return (
@@ -331,6 +329,7 @@ export default function DemoPage() {
 const [pdfLogo, setPdfLogo] = useState<string | null>(null);
 const [zipInnerFiles, setZipInnerFiles] = useState<string[]>([]);
 const [pendingZipFile, setPendingZipFile] = useState<File | null>(null);
+const [copiedMap, setCopiedMap] = useState<Record<string, boolean>>({});
 
 // tray visibilità suggerimenti (fuori da URL advanced)
 const [showIndexTray, setShowIndexTray] = useState<boolean>(false);
@@ -411,7 +410,6 @@ function handleUploadResponse(status: number, data: unknown, file?: File) {
   if (isIndexDetected(data)) {
     setIndexSuggestions(data.suggestions ?? []);
     setShowIndexTray(true);
-    setShowUrlBox(true);
     return { handled: true };
   }
 
@@ -470,8 +468,9 @@ if (!/(csv|json|gz|zip)$/i.test(file.name)) {
       if (isIndexDetected(body)) {
         setIndexSuggestions((body as IndexDetected).suggestions ?? []);
         setShowIndexTray(true);
-        setShowUrlBox(true);
         setUploadErr(null);
+        setSource({ kind: "upload", name: file?.name ?? "index", size: file?.size ?? 0, type: file?.type ?? "mixed" });
+        setMeta({ source: file?.name ?? "index", fetched_at: new Date().toISOString(), index_month_hint: null });
         setUploading(false);
         setProgress(0);
         return;
@@ -504,8 +503,11 @@ if (!/(csv|json|gz|zip)$/i.test(file.name)) {
     if (isIndexDetected(u) && Array.isArray(u.suggestions) && u.suggestions.length) {
       setIndexSuggestions(u.suggestions);
       setShowIndexTray(true);
-      setShowUrlBox(true);
       setUploadErr(null);
+      if (file) {
+      setSource({ kind: "upload", name: file.name, size: file.size, type: file.type });
+      setMeta({ source: file.name, fetched_at: new Date().toISOString(), index_month_hint: null });
+      }
     } else if (isZipInnerRequired(u) && Array.isArray(u.inner_files) && u.inner_files.length) {
       if (file) setPendingZipFile(file);
       setZipInnerFiles(u.inner_files);
@@ -543,13 +545,14 @@ if (!/(csv|json|gz|zip)$/i.test(file.name)) {
     if (isIndexDetected(body)) {
   setIndexSuggestions((body as IndexDetected).suggestions ?? []);
   setShowIndexTray(true);
-  setShowUrlBox(true);
   throw makeHandled409Error();
 }
 if (isZipInnerRequired(body)) {
   setPendingZipFile(file);
   setZipInnerFiles((body as ZipInnerRequired).inner_files ?? []);
   setShowUrlBox(true);
+  setSource({ kind: "upload", name: file.name, size: file.size, type: file.type });
+  setMeta({ source: file.name, fetched_at: new Date().toISOString(), index_month_hint: null });
   throw makeHandled409Error();
 }
 
@@ -888,6 +891,8 @@ useEffect(() => {
       ) {
         setIndexSuggestions(maybeErr.suggestions);
         setShowIndexTray(true);
+        setSource({ kind: "url", href: hrefOrLocalPath });
+        setMeta({ source: hrefOrLocalPath, fetched_at: new Date().toISOString(), index_month_hint: null });
         setShowUrlBox(true);
         setError(null);
         setRows([]);
@@ -1091,6 +1096,52 @@ useEffect(() => {
     a.click();
   }
 
+/* ---- minimal icons ---- */
+// function IconExternalLink(props: React.SVGProps<SVGSVGElement>) {
+//   return (
+//     <svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
+//       <path d="M7 7h10v10" opacity=".2" />
+//       <path d="M14 5h5v5M14 5l6 6" />
+//       <path d="M19 13v6a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6" />
+//     </svg>
+//   );
+// }
+function IconCopy(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <rect x="4" y="4" width="11" height="11" rx="2" opacity=".6" />
+    </svg>
+  );
+}
+function IconDownload(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
+      <path d="M12 3v12" />
+      <path d="M7 10l5 5 5-5" />
+      <path d="M5 21h14" />
+    </svg>
+  );
+}
+function IconCheck(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M8 12l2.5 2.5L16 9.5" />
+    </svg>
+  );
+}
+function IconRadioDot(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
+      <circle cx="12" cy="12" r="9" opacity=".35" />
+      <circle cx="12" cy="12" r="4" />
+    </svg>
+  );
+}
+
+
+
   function exportSummaryPDF() {
   if (!filteredSortedSummary.length) return;
 
@@ -1172,27 +1223,75 @@ useEffect(() => {
 
   /* ---------- UI ---------- */
   const SourceBadge = () => {
-    if (!source) return null;
-    let label = "";
-    if (source.kind === "demo") label = source.path.endsWith(".csv") ? "DEMO CSV" : "DEMO JSON";
-    if (source.kind === "upload") label = `Uploaded • ${source.name}`;
-    if (source.kind === "url") label = `URL • ${source.href}`;
-    return (
-      <div className="flex items-center gap-2 text-xs">
-        <span className="rounded-full bg-white/10 px-2 py-1">
-          Current source: <span className="font-medium">{label}</span>
-        </span>
-        <button
-          type="button"
-          className="underline opacity-80 hover:opacity-100"
-          onClick={clearResults}
-          aria-label="Clear current source and results"
-        >
-          Clear
-        </button>
+  if (!source) return null;
+
+  const label =
+    source.kind === "demo"
+      ? (source.path.endsWith(".csv") ? "DEMO CSV" : "DEMO JSON")
+      : source.kind === "upload"
+      ? `Uploaded • ${source.name}`
+      : "URL";
+
+  const urlText = source.kind === "url" ? source.href : (meta?.source ?? "");
+
+  const display = (() => {
+    if (!urlText) return "";
+    try {
+      const u = new URL(urlText, typeof window !== "undefined" ? window.location.href : undefined);
+      const host = u.hostname.replace(/^www\./, "");
+      const path = u.pathname.replace(/\/$/, "");
+      const full = `${host}${path}`;
+      return full.length <= 64 ? full : `${full.slice(0, 34)}…${full.slice(-24)}`;
+    } catch { return urlText; }
+  })();
+
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <div
+        className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 hover:bg-white/10 transition"
+        title={urlText || label}
+      >
+        <span className="text-slate-300">{label}:</span>
+        <span className="font-medium text-slate-100 max-w-[36rem] truncate">{display || "—"}</span>
+        {/* {source.kind === "url" && (
+          <a href={source.href} target="_blank" rel="noreferrer"
+             className="ml-1 opacity-80 hover:opacity-100" aria-label="Open in new tab" title="Open in new tab">
+            <IconExternalLink className="h-4 w-4" />
+          </a>
+        )} */}
       </div>
-    );
-  };
+      <button type="button" onClick={clearResults}
+              className="underline opacity-80 hover:opacity-100">Clear</button>
+    </div>
+  );
+};
+
+  const extFromUrl = (u: string) => {
+  try {
+    const path = new URL(u, location.href).pathname.toLowerCase();
+    const m = path.match(/\.(json\.gz|json|csv|gz|zip)$/i);
+    return m ? m[1] : null;
+  } catch { return null; }
+};
+
+function middleTruncate(str: string, max: number) {
+   if (str.length <= max) return str;
+   const keep = Math.max(6, Math.floor((max - 1) / 2));
+   return str.slice(0, keep) + "…" + str.slice(-keep);
+ }
+
+ const shortUrl = (u: string) => {
+   try {
+     const url = new URL(u, typeof window !== "undefined" ? window.location.href : undefined);
+     const host = url.hostname.replace(/^www\./, "");
+     const path = url.pathname.replace(/\/$/, "");
+     const full = host + path;
+     // più conservativo per evitare il re-truncate di CSS
+     const max = typeof window !== "undefined" && window.innerWidth < 1024 ? 44 : 60;
+     return middleTruncate(full, max);
+   } catch { return u; }
+ };
+
 
   return (
     <MotionConfig reducedMotion="user">
@@ -1298,16 +1397,6 @@ useEffect(() => {
 
   <div className="ml-2">
     <SourceBadge />
-    {indexSuggestions.length > 0 && !showIndexTray && (
-  <button
-    type="button"
-    onClick={() => setShowIndexTray(true)}
-    className="text-xs rounded-full bg-yellow-500/10 border border-yellow-500/30 px-2 py-1"
-    title="Show CMS index suggestions"
-  >
-    Show suggestions ({indexSuggestions.length})
-  </button>
-)}
   </div>
 
   {/* ZIP inner selector - SEMPRE visibile se ci sono inner files */}
@@ -1380,58 +1469,137 @@ useEffect(() => {
               )}
             </CardShell>
 
-{/* --- Index suggestions tray (sempre fuori dall'advanced) --- */}
+{/* --- Index suggestions tray (refined) --- */}
 {indexSuggestions.length > 0 && (
-  <div
-    className="mt-3 rounded-lg border border-yellow-500/30 bg-yellow-500/5"
-    aria-busy={busy}
-  >
-    <div className="flex items-center justify-between px-3 py-2">
-      <div className="text-xs text-yellow-200/90">
-        CMS index detected — suggestions: <span className="font-medium">{indexSuggestions.length}</span>
+  <div className="mt-3 rounded-2xl border border-yellow-500/25 bg-gradient-to-b from-yellow-500/[0.06] to-transparent">
+    <div className="flex items-center justify-between px-4 py-2.5">
+      <div className="text-sm text-yellow-100/90">
+        <span className="font-medium">CMS index detected</span>
+        <span className="opacity-80"> — {indexSuggestions.length} in-network files</span>
       </div>
       <div className="flex items-center gap-2">
-        <Btn
-          type="button"
-          kind="outline"
-          onClick={() => setShowIndexTray(v => !v)}
-          className="text-xs"
-        >
+        <Btn type="button" kind="outline" onClick={() => setShowIndexTray(v => !v)} className="text-xs">
           {showIndexTray ? "Hide suggestions" : "Show suggestions"}
         </Btn>
-        {/* opzionale: pulizia esplicita se proprio serve */}
-        {/* <Btn type="button" kind="ghost" onClick={() => { setIndexSuggestions([]); setPickedIndexUrl(null); }} className="text-xs">Clear</Btn> */}
       </div>
     </div>
 
     {showIndexTray && (
       <div className="px-3 pb-3">
-        <div className="flex flex-wrap gap-2">
-          {indexSuggestions.map((u, i) => (
-            <Btn
-              key={u + i}
-              type="button"
-              kind="outline"
-              onClick={() => analyzeURL(u, { fromIndex: true /* non serve preserveIndexList */ })}
-              className={`text-xs truncate max-w-full ${busy ? "pointer-events-none opacity-50" : ""}`}
-              title={u}
-              disabled={busy}
-              aria-disabled={busy}
-            >
-              {u}
-            </Btn>
-          ))}
-        </div>
+        <div
+  role="listbox"
+  aria-label="In-network files from CMS index"
+  className="grid md:grid-cols-2 gap-2 pr-1 overflow-x-hidden"
+  aria-busy={busy}
+>
+  {indexSuggestions.map((u) => {
+  const picked = pickedIndexUrl === u;
+  const ext = extFromUrl(u);
+  const copied = !!copiedMap[u];
 
-        {pickedIndexUrl && (
-          <div className="text-[11px] opacity-75 mt-2">
-            Picked: <span className="font-mono">{pickedIndexUrl}</span>
-          </div>
+  return (
+    <div
+      key={u}
+      role="option"
+      aria-selected={picked}
+      className={[
+        "group flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5",
+        "bg-black/35 backdrop-blur-sm",
+        picked
+          ? "border-sky-400/60 ring-2 ring-sky-400/30 shadow-[0_0_0_1px_rgba(56,189,248,.25)]"
+          : "border-white/10 hover:border-white/20 hover:bg-white/5",
+        "cursor-pointer",
+        busy ? "pointer-events-none opacity-60" : "",
+      ].join(" ")}
+      onClick={() => analyzeURL(u, { fromIndex: true })}
+      title={u}
+    >
+      {/* left: radio + testo (tronca, niente orizzontale) */}
+      <div className="flex-1 min-w-0 flex items-center gap-2">
+        <span
+  className={[
+    "inline-flex h-5 w-5 flex-none items-center justify-center rounded-full text-sky-300",
+    picked ? "" : "text-slate-300 opacity-80 group-hover:opacity-100",
+  ].join(" ")}
+  aria-hidden="true"
+>
+  {picked ? <IconCheck className="h-5 w-5" /> : <IconRadioDot className="h-5 w-5" />}
+</span>
+
+
+        <div className="min-w-0">
+          <div className="truncate font-medium text-slate-100">{shortUrl(u)}</div>
+          <div className="text-xs text-slate-400 truncate">{u}</div>
+        </div>
+      </div>
+
+      {/* right: ext pill + azioni */}
+      <div className="flex items-center gap-2 ml-2">
+        {ext && (
+          <span
+            className="text-[11px] rounded-full border border-white/15 bg-white/5 px-2 py-0.5 uppercase tracking-wide"
+            aria-label={`File type ${ext}`}
+          >
+            {ext}
+          </span>
         )}
+
+        {/* Download (larghezza fissa) */}
+<a
+  href={u}
+  target="_blank"
+  rel="noreferrer"
+  className="flex flex-col items-center gap-1 rounded-md border border-white/10 px-2 py-1.5
+             text-[11px] text-slate-200 hover:bg-white/10 focus:outline-none cursor-pointer w-[72px]"
+  onClick={(e) => e.stopPropagation()}
+  title="Open / download"
+>
+  <IconDownload className="h-4 w-4" />
+  <span className="opacity-80">Download</span>
+</a>
+
+{/* Copy con feedback ma dimensioni fisse */}
+<button
+  type="button"
+  className="flex flex-col items-center gap-1 rounded-md border border-white/10 px-2 py-1.5
+             text-[11px] text-slate-200 hover:bg-white/10 cursor-pointer w-[72px]"
+  onClick={(e) => {
+    e.stopPropagation();
+    navigator.clipboard?.writeText(u);
+    setCopiedMap((m) => ({ ...m, [u]: true }));
+    setTimeout(() => setCopiedMap((m) => ({ ...m, [u]: false })), 1100);
+  }}
+  aria-live="polite"
+  title={copied ? "Copied!" : "Copy link"}
+>
+  {copied ? <IconCheck className="h-4 w-4 text-emerald-300" /> : <IconCopy className="h-4 w-4" />}
+  {/* la label resta sempre “Copy” -> nessun reflow */}
+  <span className={copied ? "text-emerald-300" : "opacity-80"}>
+  {copied ? "Copied" : "Copy"}
+</span>
+</button>
+
+      </div>
+    </div>
+  );
+})}
+
+</div>
+
+
+        {/* {pickedIndexUrl && (
+          <div className="text-[11px] mt-2 flex items-center gap-2">
+            <span className="inline-flex items-center gap-1 rounded-full border border-sky-400/30 bg-sky-400/10 px-2 py-1">
+              <span className="opacity-80">Selected</span>
+              <span className="font-mono">{pickedIndexUrl}</span>
+            </span>
+          </div>
+        )} */}
       </div>
     )}
   </div>
 )}
+
 
           </section>
 
